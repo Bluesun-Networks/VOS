@@ -1,0 +1,17 @@
+# CodeRabbit Configuration
+# Docs: https://docs.coderabbit.ai/guides/configure-coderabbit
+
+language: en
+reviews:
+  profile: chill        # chill = less nitpicky, assertive = thorough
+  high_level_summary: true
+  auto_review:
+    enabled: true
+    drafts: false       # don't review draft PRs
+  path_instructions:
+    - path: "backend/**"
+      instructions: "FastAPI + SQLite backend. Check for SQL injection, proper error handling, and async patterns."
+    - path: "frontend/**"
+      instructions: "Next.js frontend with TypeScript. Check for proper typing, React best practices, and accessibility."
+chat:
+  auto_reply: true      # respond to follow-up comments on reviews
