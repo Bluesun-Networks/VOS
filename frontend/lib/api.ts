@@ -48,6 +48,24 @@ export interface PersonaStatus {
   status: 'queued' | 'running' | 'completed';
 }
 
+export interface MetaCommentSource {
+  persona_id: string;
+  persona_name: string;
+  persona_color: string;
+  original_content: string;
+}
+
+export interface MetaComment {
+  id: string;
+  content: string;
+  start_line: number;
+  end_line: number;
+  sources: MetaCommentSource[];
+  category: string;
+  priority: string;
+  created_at: string;
+}
+
 export async function fetchDocuments(): Promise<Document[]> {
   const res = await fetch(`${API_BASE_URL}/api/v1/documents/`);
   if (!res.ok) throw new Error('Failed to fetch documents');
@@ -99,6 +117,20 @@ export async function fetchLatestComments(docId: string): Promise<Comment[]> {
   return res.json();
 }
 
+export async function synthesizeMetaReview(docId: string, reviewId: string): Promise<MetaComment[]> {
+  const res = await fetch(`${API_BASE_URL}/api/v1/reviews/${docId}/reviews/${reviewId}/meta`, {
+    method: 'POST',
+  });
+  if (!res.ok) throw new Error('Failed to synthesize meta review');
+  return res.json();
+}
+
+export async function fetchMetaComments(docId: string, reviewId: string): Promise<MetaComment[]> {
+  const res = await fetch(`${API_BASE_URL}/api/v1/reviews/${docId}/reviews/${reviewId}/meta`);
+  if (!res.ok) return [];
+  return res.json();
+}
+
 export function startReviewStream(
   docId: string,
   personaIds: string[],
@@ -110,6 +142,7 @@ export function startReviewStream(
     status?: string;
     comment?: Comment;
     total_comments?: number;
+    review_id?: string;
   }) => void,
   onError: (err: Error) => void,
 ): AbortController {

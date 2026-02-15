@@ -35,6 +35,7 @@ class DbReview(Base):
 
     document = relationship("DbDocument", back_populates="reviews")
     comments = relationship("DbComment", back_populates="review", cascade="all, delete-orphan")
+    meta_comments = relationship("DbMetaComment", back_populates="review", cascade="all, delete-orphan")
 
 
 class DbComment(Base):
@@ -52,6 +53,22 @@ class DbComment(Base):
     created_at = Column(DateTime, default=datetime.utcnow)
 
     review = relationship("DbReview", back_populates="comments")
+
+
+class DbMetaComment(Base):
+    __tablename__ = "meta_comments"
+
+    id = Column(String, primary_key=True)
+    review_id = Column(String, ForeignKey("reviews.id"), nullable=False)
+    content = Column(Text, nullable=False)
+    start_line = Column(Integer, nullable=False)
+    end_line = Column(Integer, nullable=False)
+    sources = Column(JSON, nullable=False)  # [{persona_id, persona_name, persona_color, original_content}]
+    category = Column(String, nullable=False)  # structure, clarity, technical, security, accessibility
+    priority = Column(String, nullable=False)  # critical, high, medium, low
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+    review = relationship("DbReview", back_populates="meta_comments")
 
 
 def init_db():

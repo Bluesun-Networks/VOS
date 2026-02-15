@@ -6,8 +6,27 @@ import Link from 'next/link';
 import ReactMarkdown from 'react-markdown';
 import {
   fetchDocument, fetchPersonas, fetchLatestComments, startReviewStream,
+  fetchReviews, fetchMetaComments, synthesizeMetaReview,
   type Document, type Persona, type Comment, type PersonaStatus,
+  type MetaComment,
 } from '@/lib/api';
+
+type ViewMode = 'meta' | 'individual';
+
+const PRIORITY_COLORS: Record<string, string> = {
+  critical: '#ef4444',
+  high: '#f97316',
+  medium: '#eab308',
+  low: '#6b7280',
+};
+
+const CATEGORY_LABELS: Record<string, string> = {
+  structure: 'Structure',
+  clarity: 'Clarity',
+  technical: 'Technical',
+  security: 'Security',
+  accessibility: 'Accessibility',
+};
 
 export default function DocumentDetailPage() {
   const params = useParams();
@@ -26,21 +45,42 @@ export default function DocumentDetailPage() {
   const [activeCommentId, setActiveCommentId] = useState<string | null>(null);
   const [filterPersona, setFilterPersona] = useState<string | null>(null);
 
+  // Meta review state
+  const [viewMode, setViewMode] = useState<ViewMode>('meta');
+  const [metaComments, setMetaComments] = useState<MetaComment[]>([]);
+  const [isSynthesizing, setIsSynthesizing] = useState(false);
+  const [expandedMetaId, setExpandedMetaId] = useState<string | null>(null);
+  const [hoveredPersonaId, setHoveredPersonaId] = useState<string | null>(null);
+  const [currentReviewId, setCurrentReviewId] = useState<string | null>(null);
+
   const abortRef = useRef<AbortController | null>(null);
   const commentsPanelRef = useRef<HTMLDivElement>(null);
   const hasStartedAutoReview = useRef(false);
 
   const contentLines = document?.content?.split('\n') || [];
 
-  // Load doc + personas
+  // Load doc + personas + existing comments + meta comments
   useEffect(() => {
-    Promise.all([fetchDocument(docId), fetchPersonas(), fetchLatestComments(docId)])
-      .then(([doc, p, existingComments]) => {
+    Promise.all([fetchDocument(docId), fetchPersonas(), fetchLatestComments(docId), fetchReviews(docId)])
+      .then(async ([doc, p, existingComments, reviews]) => {
         setDocument(doc);
         setPersonas(p);
         setSelectedPersonaIds(p.map(pp => pp.id));
         if (existingComments.length > 0 && !autoReview) {
           setComments(existingComments);
+          // Load cached meta comments from the latest completed review
+          const completedReview = reviews.find(r => r.status === 'completed');
+          if (completedReview) {
+            setCurrentReviewId(completedReview.id);
+            try {
+              const cached = await fetchMetaComments(docId, completedReview.id);
+              if (cached.length > 0) {
+                setMetaComments(cached);
+              }
+            } catch {
+              // No cached meta comments
+            }
+          }
         }
       })
       .catch((err) => setError(err.message));
@@ -54,12 +94,28 @@ export default function DocumentDetailPage() {
     }
   }, [autoReview, document, personas]);
 
+  const triggerMetaSynthesis = async (reviewId: string) => {
+    setIsSynthesizing(true);
+    try {
+      const result = await synthesizeMetaReview(docId, reviewId);
+      setMetaComments(result);
+      setViewMode('meta');
+    } catch {
+      // Synthesis failed, stay on individual view
+    } finally {
+      setIsSynthesizing(false);
+    }
+  };
+
   const doReview = (personaIds: string[]) => {
     if (abortRef.current) abortRef.current.abort();
     setIsReviewing(true);
     setComments([]);
+    setMetaComments([]);
     setPersonaStatuses(new Map());
     setShowPersonaPanel(false);
+    setCurrentReviewId(null);
+    setViewMode('individual'); // Show individual during streaming
 
     abortRef.current = startReviewStream(
       docId,
@@ -82,6 +138,11 @@ export default function DocumentDetailPage() {
         }
         if (event.type === 'done') {
           setIsReviewing(false);
+          // Auto-trigger meta synthesis
+          if (event.review_id) {
+            setCurrentReviewId(event.review_id);
+            triggerMetaSynthesis(event.review_id);
+          }
         }
       },
       (err) => {
@@ -97,24 +158,37 @@ export default function DocumentDetailPage() {
     );
   };
 
-  // Build highlight map
+  // Build highlight map based on current view mode
   const lineHighlights = useCallback(() => {
     const highlights: Map<number, { commentId: string; color: string }[]> = new Map();
-    const filtered = filterPersona ? comments.filter(c => c.persona_id === filterPersona) : comments;
-    filtered.forEach((comment) => {
-      for (let line = comment.start_line; line <= comment.end_line; line++) {
-        if (!highlights.has(line)) highlights.set(line, []);
-        highlights.get(line)!.push({ commentId: comment.id, color: comment.persona_color });
-      }
-    });
+
+    if (viewMode === 'meta' && metaComments.length > 0) {
+      metaComments.forEach((mc) => {
+        const color = PRIORITY_COLORS[mc.priority] || PRIORITY_COLORS.medium;
+        for (let line = mc.start_line; line <= mc.end_line; line++) {
+          if (!highlights.has(line)) highlights.set(line, []);
+          highlights.get(line)!.push({ commentId: mc.id, color });
+        }
+      });
+    } else {
+      const filtered = filterPersona ? comments.filter(c => c.persona_id === filterPersona) : comments;
+      filtered.forEach((comment) => {
+        for (let line = comment.start_line; line <= comment.end_line; line++) {
+          if (!highlights.has(line)) highlights.set(line, []);
+          highlights.get(line)!.push({ commentId: comment.id, color: comment.persona_color });
+        }
+      });
+    }
     return highlights;
-  }, [comments, filterPersona]);
+  }, [comments, filterPersona, viewMode, metaComments]);
 
   const highlights = lineHighlights();
 
   const sortedComments = [...comments]
     .filter(c => !filterPersona || c.persona_id === filterPersona)
     .sort((a, b) => a.start_line - b.start_line);
+
+  const sortedMetaComments = [...metaComments].sort((a, b) => a.start_line - b.start_line);
 
   // Unique personas in comments for filter
   const commentPersonas = Array.from(new Map(comments.map(c => [c.persona_id, { id: c.persona_id, name: c.persona_name, color: c.persona_color }])).values());
@@ -200,6 +274,12 @@ export default function DocumentDetailPage() {
                 <span>{ps.persona_name}</span>
               </div>
             ))}
+            {isSynthesizing && (
+              <div className="flex items-center gap-1.5 px-2 py-1 rounded-md text-[10px] font-medium bg-indigo-500/10 text-indigo-400 border border-indigo-500/30">
+                <div className="w-1.5 h-1.5 rounded-full animate-pulse-dot bg-indigo-400" />
+                <span>Synthesizing...</span>
+              </div>
+            )}
           </div>
         )}
       </div>
@@ -230,12 +310,10 @@ export default function DocumentDetailPage() {
                       }}
                       onClick={() => {
                         if (hasHighlight) {
-                          const comment = sortedComments.find(c => c.id === lineHighs[0].commentId);
-                          if (comment) {
-                            setActiveCommentId(comment.id);
-                            const el = window.document.getElementById(`comment-${comment.id}`);
-                            el?.scrollIntoView({ behavior: 'smooth', block: 'center' });
-                          }
+                          const targetId = lineHighs[0].commentId;
+                          setActiveCommentId(targetId);
+                          const el = window.document.getElementById(`comment-${targetId}`);
+                          el?.scrollIntoView({ behavior: 'smooth', block: 'center' });
                         }
                       }}
                     >
@@ -314,16 +392,57 @@ export default function DocumentDetailPage() {
 
         {/* Comments panel */}
         <div className="w-[380px] border-l border-[#2a2a3a] bg-[#0c0c12] flex flex-col flex-shrink-0">
-          {/* Comment header with filter */}
+          {/* View mode toggle + header */}
           <div className="p-3 border-b border-[#2a2a3a]">
-            <div className="flex items-center justify-between mb-2">
+            {/* Toggle: Meta Review | Individual Reviews */}
+            {(metaComments.length > 0 || comments.length > 0) && (
+              <div className="flex rounded-lg bg-[#12121a] p-0.5 mb-2.5">
+                <button
+                  onClick={() => setViewMode('meta')}
+                  className={`flex-1 text-xs font-medium py-1.5 rounded-md transition-all ${
+                    viewMode === 'meta'
+                      ? 'bg-indigo-600 text-white shadow-sm'
+                      : 'text-neutral-500 hover:text-neutral-300'
+                  }`}
+                >
+                  Meta Review
+                  {metaComments.length > 0 && (
+                    <span className={`ml-1 ${viewMode === 'meta' ? 'text-indigo-200' : 'text-neutral-600'}`}>
+                      ({metaComments.length})
+                    </span>
+                  )}
+                </button>
+                <button
+                  onClick={() => setViewMode('individual')}
+                  className={`flex-1 text-xs font-medium py-1.5 rounded-md transition-all ${
+                    viewMode === 'individual'
+                      ? 'bg-indigo-600 text-white shadow-sm'
+                      : 'text-neutral-500 hover:text-neutral-300'
+                  }`}
+                >
+                  Individual
+                  {comments.length > 0 && (
+                    <span className={`ml-1 ${viewMode === 'individual' ? 'text-indigo-200' : 'text-neutral-600'}`}>
+                      ({comments.length})
+                    </span>
+                  )}
+                </button>
+              </div>
+            )}
+
+            {/* Header */}
+            <div className="flex items-center justify-between">
               <h2 className="text-sm font-semibold">
-                Comments {comments.length > 0 && <span className="text-neutral-500 font-normal">({sortedComments.length})</span>}
+                {viewMode === 'meta' ? 'Meta Review' : 'Comments'}
+                {viewMode === 'individual' && comments.length > 0 && (
+                  <span className="text-neutral-500 font-normal ml-1">({sortedComments.length})</span>
+                )}
               </h2>
             </div>
-            {/* Persona filter chips */}
-            {commentPersonas.length > 1 && (
-              <div className="flex flex-wrap gap-1">
+
+            {/* Persona filter chips (only in individual mode) */}
+            {viewMode === 'individual' && commentPersonas.length > 1 && (
+              <div className="flex flex-wrap gap-1 mt-2">
                 <button
                   onClick={() => setFilterPersona(null)}
                   className={`text-[10px] px-2 py-0.5 rounded-full transition-colors ${!filterPersona ? 'bg-[#2a2a3a] text-white' : 'text-neutral-500 hover:text-neutral-300'}`}
@@ -348,53 +467,187 @@ export default function DocumentDetailPage() {
             )}
           </div>
 
-          {/* Comments list */}
+          {/* Comments/Meta list */}
           <div ref={commentsPanelRef} className="flex-1 overflow-auto p-3 space-y-2">
-            {sortedComments.length === 0 && !isReviewing && (
-              <div className="text-center text-neutral-500 py-12">
-                <svg className="w-10 h-10 mx-auto mb-3 opacity-30" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1} d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z" />
-                </svg>
-                <p className="text-sm">No comments yet</p>
-                <p className="text-xs mt-1 text-neutral-600">Start a review to see feedback</p>
-              </div>
+            {/* META VIEW */}
+            {viewMode === 'meta' && (
+              <>
+                {metaComments.length === 0 && !isSynthesizing && !isReviewing && (
+                  <div className="text-center text-neutral-500 py-12">
+                    <svg className="w-10 h-10 mx-auto mb-3 opacity-30" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1} d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2" />
+                    </svg>
+                    <p className="text-sm">No meta review yet</p>
+                    <p className="text-xs mt-1 text-neutral-600">Run a review to generate synthesized feedback</p>
+                  </div>
+                )}
+
+                {sortedMetaComments.map((mc) => {
+                  const isActive = activeCommentId === mc.id;
+                  const isExpanded = expandedMetaId === mc.id;
+                  const priorityColor = PRIORITY_COLORS[mc.priority] || PRIORITY_COLORS.medium;
+
+                  return (
+                    <div
+                      key={mc.id}
+                      id={`comment-${mc.id}`}
+                      className={`rounded-lg border-l-[3px] cursor-pointer transition-all duration-200 animate-slide-in
+                        ${isActive ? 'bg-[#1a1a28] ring-1 ring-white/10' : 'bg-[#12121a] hover:bg-[#16161f]'}`}
+                      style={{ borderLeftColor: priorityColor }}
+                    >
+                      {/* Main meta comment content */}
+                      <div
+                        className="p-3"
+                        onClick={() => {
+                          setActiveCommentId(mc.id);
+                        }}
+                        onMouseEnter={() => setActiveCommentId(mc.id)}
+                        onMouseLeave={() => { if (!isExpanded) setActiveCommentId(null); }}
+                      >
+                        {/* Top row: category badge + priority + line numbers */}
+                        <div className="flex items-center gap-1.5 mb-2">
+                          <span
+                            className="text-[10px] font-medium px-1.5 py-0.5 rounded"
+                            style={{ backgroundColor: `${priorityColor}20`, color: priorityColor }}
+                          >
+                            {mc.priority.toUpperCase()}
+                          </span>
+                          <span className="text-[10px] font-medium px-1.5 py-0.5 rounded bg-[#1a1a25] text-neutral-400">
+                            {CATEGORY_LABELS[mc.category] || mc.category}
+                          </span>
+                          <span className="text-[10px] text-neutral-600 ml-auto">
+                            L{mc.start_line + 1}{mc.end_line !== mc.start_line ? `-${mc.end_line + 1}` : ''}
+                          </span>
+                        </div>
+
+                        {/* Synthesized content */}
+                        <p className="text-[13px] text-[#b4b4c4] leading-relaxed mb-2">{mc.content}</p>
+
+                        {/* Persona dots + expand toggle */}
+                        <div className="flex items-center gap-1">
+                          {mc.sources.map((source, si) => (
+                            <div
+                              key={si}
+                              className="relative group/dot"
+                              onMouseEnter={() => setHoveredPersonaId(`${mc.id}-${source.persona_id}`)}
+                              onMouseLeave={() => setHoveredPersonaId(null)}
+                            >
+                              <span
+                                className="w-5 h-5 rounded-full flex items-center justify-center text-[9px] font-bold text-white cursor-pointer transition-transform hover:scale-125"
+                                style={{ backgroundColor: source.persona_color }}
+                                title={source.persona_name}
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  setExpandedMetaId(isExpanded ? null : mc.id);
+                                }}
+                              >
+                                {source.persona_name.charAt(0)}
+                              </span>
+                              {/* Hover tooltip with original comment */}
+                              {hoveredPersonaId === `${mc.id}-${source.persona_id}` && (
+                                <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 w-56 p-2.5 rounded-lg bg-[#1a1a28] border border-[#2a2a3a] shadow-xl z-50">
+                                  <div className="flex items-center gap-1.5 mb-1">
+                                    <span className="w-2 h-2 rounded-full" style={{ backgroundColor: source.persona_color }} />
+                                    <span className="text-[10px] font-medium" style={{ color: source.persona_color }}>{source.persona_name}</span>
+                                  </div>
+                                  <p className="text-[11px] text-[#999] leading-relaxed">{source.original_content}</p>
+                                  <div className="absolute top-full left-1/2 -translate-x-1/2 w-2 h-2 bg-[#1a1a28] border-r border-b border-[#2a2a3a] rotate-45 -mt-1" />
+                                </div>
+                              )}
+                            </div>
+                          ))}
+                          <button
+                            className="ml-auto text-[10px] text-neutral-500 hover:text-neutral-300 transition-colors"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setExpandedMetaId(isExpanded ? null : mc.id);
+                            }}
+                          >
+                            {isExpanded ? 'Hide originals' : `${mc.sources.length} sources`}
+                          </button>
+                        </div>
+                      </div>
+
+                      {/* Expanded: show original persona comments */}
+                      {isExpanded && (
+                        <div className="border-t border-[#2a2a3a] p-2 space-y-1.5 bg-[#0e0e16]">
+                          {mc.sources.map((source, si) => (
+                            <div
+                              key={si}
+                              className="p-2 rounded-md bg-[#12121a] border-l-2"
+                              style={{ borderLeftColor: source.persona_color }}
+                            >
+                              <div className="flex items-center gap-1.5 mb-1">
+                                <span className="w-1.5 h-1.5 rounded-full" style={{ backgroundColor: source.persona_color }} />
+                                <span className="text-[10px] font-medium" style={{ color: source.persona_color }}>{source.persona_name}</span>
+                              </div>
+                              <p className="text-[11px] text-[#999] leading-relaxed">{source.original_content}</p>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
+
+                {isSynthesizing && (
+                  <div className="flex items-center justify-center py-6 gap-2">
+                    <div className="w-4 h-4 border-2 border-indigo-500 border-t-transparent rounded-full animate-spin" />
+                    <span className="text-xs text-neutral-500">Synthesizing meta review...</span>
+                  </div>
+                )}
+              </>
             )}
 
-            {sortedComments.map((comment) => {
-              const isActive = activeCommentId === comment.id;
-              return (
-                <div
-                  key={comment.id}
-                  id={`comment-${comment.id}`}
-                  className={`rounded-lg p-3 border-l-[3px] cursor-pointer transition-all duration-200 animate-slide-in
-                    ${isActive ? 'bg-[#1a1a28] ring-1 ring-white/10 scale-[1.01]' : 'bg-[#12121a] hover:bg-[#16161f]'}`}
-                  style={{ borderLeftColor: comment.persona_color }}
-                  onClick={() => {
-                    setActiveCommentId(comment.id);
-                    // Scroll document to the line
-                    const lineEl = window.document.querySelector(`[data-line="${comment.start_line}"]`);
-                    lineEl?.scrollIntoView({ behavior: 'smooth', block: 'center' });
-                  }}
-                  onMouseEnter={() => setActiveCommentId(comment.id)}
-                  onMouseLeave={() => setActiveCommentId(null)}
-                >
-                  <div className="flex items-center gap-1.5 mb-1.5">
-                    <span className="w-2 h-2 rounded-full flex-shrink-0" style={{ backgroundColor: comment.persona_color }} />
-                    <span className="text-xs font-medium" style={{ color: comment.persona_color }}>{comment.persona_name}</span>
-                    <span className="text-[10px] text-neutral-600 ml-auto">
-                      L{comment.start_line + 1}{comment.end_line !== comment.start_line ? `-${comment.end_line + 1}` : ''}
-                    </span>
+            {/* INDIVIDUAL VIEW */}
+            {viewMode === 'individual' && (
+              <>
+                {sortedComments.length === 0 && !isReviewing && (
+                  <div className="text-center text-neutral-500 py-12">
+                    <svg className="w-10 h-10 mx-auto mb-3 opacity-30" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1} d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z" />
+                    </svg>
+                    <p className="text-sm">No comments yet</p>
+                    <p className="text-xs mt-1 text-neutral-600">Start a review to see feedback</p>
                   </div>
-                  <p className="text-[13px] text-[#b4b4c4] leading-relaxed">{comment.content}</p>
-                </div>
-              );
-            })}
+                )}
 
-            {isReviewing && (
-              <div className="flex items-center justify-center py-6 gap-2">
-                <div className="w-4 h-4 border-2 border-indigo-500 border-t-transparent rounded-full animate-spin" />
-                <span className="text-xs text-neutral-500">Reviewing...</span>
-              </div>
+                {sortedComments.map((comment) => {
+                  const isActive = activeCommentId === comment.id;
+                  return (
+                    <div
+                      key={comment.id}
+                      id={`comment-${comment.id}`}
+                      className={`rounded-lg p-3 border-l-[3px] cursor-pointer transition-all duration-200 animate-slide-in
+                        ${isActive ? 'bg-[#1a1a28] ring-1 ring-white/10 scale-[1.01]' : 'bg-[#12121a] hover:bg-[#16161f]'}`}
+                      style={{ borderLeftColor: comment.persona_color }}
+                      onClick={() => {
+                        setActiveCommentId(comment.id);
+                        const lineEl = window.document.querySelector(`[data-line="${comment.start_line}"]`);
+                        lineEl?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                      }}
+                      onMouseEnter={() => setActiveCommentId(comment.id)}
+                      onMouseLeave={() => setActiveCommentId(null)}
+                    >
+                      <div className="flex items-center gap-1.5 mb-1.5">
+                        <span className="w-2 h-2 rounded-full flex-shrink-0" style={{ backgroundColor: comment.persona_color }} />
+                        <span className="text-xs font-medium" style={{ color: comment.persona_color }}>{comment.persona_name}</span>
+                        <span className="text-[10px] text-neutral-600 ml-auto">
+                          L{comment.start_line + 1}{comment.end_line !== comment.start_line ? `-${comment.end_line + 1}` : ''}
+                        </span>
+                      </div>
+                      <p className="text-[13px] text-[#b4b4c4] leading-relaxed">{comment.content}</p>
+                    </div>
+                  );
+                })}
+
+                {isReviewing && (
+                  <div className="flex items-center justify-center py-6 gap-2">
+                    <div className="w-4 h-4 border-2 border-indigo-500 border-t-transparent rounded-full animate-spin" />
+                    <span className="text-xs text-neutral-500">Reviewing...</span>
+                  </div>
+                )}
+              </>
             )}
           </div>
         </div>
