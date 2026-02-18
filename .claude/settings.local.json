@@ -5,7 +5,18 @@
       "Bash(pip3 show:*)",
       "Bash(pip3 install:*)",
       "Bash(brew install:*)",
-      "Bash(git stash:*)"
+      "Bash(git stash:*)",
+      "Bash(grep:*)",
+      "Bash(/bin/rm:*)",
+      "Bash(bun install:*)",
+      "Bash(pip3 index:*)",
+      "Bash(npm view:*)",
+      "Bash(for pkg in fastapi uvicorn pydantic pydantic-settings gitpython anthropic python-multipart sqlalchemy aiosqlite)",
+      "Bash(do echo -n \"$pkg: \")",
+      "Bash(done)",
+      "Bash(curl:*)",
+      "Bash(python3:*)",
+      "Bash(bun run build:*)"
     ]
   }
 }
