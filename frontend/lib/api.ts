@@ -5,7 +5,6 @@ export interface Document {
   title: string;
   description?: string;
   content: string;
-  is_archived: boolean;
   created_at: string;
   updated_at: string;
   review_count: number;
@@ -19,6 +18,7 @@ export interface Persona {
   tone: string;
   focus_areas: string[];
   color: string;
+  weight: number;
 }
 
 export interface Comment {
@@ -67,28 +67,16 @@ export interface MetaComment {
   created_at: string;
 }
 
-export async function fetchDocuments(includeArchived = false): Promise<Document[]> {
-  const params = includeArchived ? '?include_archived=true' : '';
-  const res = await fetch(`${API_BASE_URL}/api/v1/documents/${params}`);
+export interface MetaReview {
+  comments: MetaComment[];
+  verdict: 'ship_it' | 'fix_first' | 'major_rework';
+  confidence: number;
+}
+
+export async function fetchDocuments(): Promise<Document[]> {
+  const res = await fetch(`${API_BASE_URL}/api/v1/documents/`);
   if (!res.ok) throw new Error('Failed to fetch documents');
   return res.json();
-}
-
-export async function archiveDocument(id: string): Promise<Document> {
-  const res = await fetch(`${API_BASE_URL}/api/v1/documents/${id}/archive`, { method: 'POST' });
-  if (!res.ok) throw new Error('Failed to archive document');
-  return res.json();
-}
-
-export async function restoreDocument(id: string): Promise<Document> {
-  const res = await fetch(`${API_BASE_URL}/api/v1/documents/${id}/restore`, { method: 'POST' });
-  if (!res.ok) throw new Error('Failed to restore document');
-  return res.json();
-}
-
-export async function deleteDocument(id: string): Promise<void> {
-  const res = await fetch(`${API_BASE_URL}/api/v1/documents/${id}`, { method: 'DELETE' });
-  if (!res.ok) throw new Error('Failed to delete document');
 }
 
 export async function fetchDocument(id: string): Promise<Document> {
@@ -100,6 +88,16 @@ export async function fetchDocument(id: string): Promise<Document> {
 export async function fetchPersonas(): Promise<Persona[]> {
   const res = await fetch(`${API_BASE_URL}/api/v1/personas/`);
   if (!res.ok) throw new Error('Failed to fetch personas');
+  return res.json();
+}
+
+export async function updatePersona(personaId: string, data: { weight?: number }): Promise<Persona> {
+  const res = await fetch(`${API_BASE_URL}/api/v1/personas/${personaId}`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(data),
+  });
+  if (!res.ok) throw new Error('Failed to update persona');
   return res.json();
 }
 
@@ -136,7 +134,7 @@ export async function fetchLatestComments(docId: string): Promise<Comment[]> {
   return res.json();
 }
 
-export async function synthesizeMetaReview(docId: string, reviewId: string): Promise<MetaComment[]> {
+export async function synthesizeMetaReview(docId: string, reviewId: string): Promise<MetaReview> {
   const res = await fetch(`${API_BASE_URL}/api/v1/reviews/${docId}/reviews/${reviewId}/meta`, {
     method: 'POST',
   });
@@ -144,9 +142,9 @@ export async function synthesizeMetaReview(docId: string, reviewId: string): Pro
   return res.json();
 }
 
-export async function fetchMetaComments(docId: string, reviewId: string): Promise<MetaComment[]> {
+export async function fetchMetaComments(docId: string, reviewId: string): Promise<MetaReview> {
   const res = await fetch(`${API_BASE_URL}/api/v1/reviews/${docId}/reviews/${reviewId}/meta`);
-  if (!res.ok) return [];
+  if (!res.ok) return { comments: [], verdict: 'ship_it', confidence: 0 };
   return res.json();
 }
 

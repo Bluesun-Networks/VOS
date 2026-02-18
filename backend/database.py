@@ -1,4 +1,4 @@
-from sqlalchemy import create_engine, Column, String, Text, DateTime, Integer, ForeignKey, JSON, Boolean
+from sqlalchemy import create_engine, Column, String, Text, DateTime, Integer, Float, ForeignKey, JSON
 from sqlalchemy.orm import declarative_base, sessionmaker, relationship
 from datetime import datetime
 
@@ -17,7 +17,6 @@ class DbDocument(Base):
     description = Column(Text, nullable=True)
     content = Column(Text, nullable=False)
     repo_path = Column(String, nullable=True)
-    is_archived = Column(Boolean, default=False, nullable=False)
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
@@ -33,6 +32,9 @@ class DbReview(Base):
     status = Column(String, default="pending")  # pending, running, completed, failed
     created_at = Column(DateTime, default=datetime.utcnow)
     completed_at = Column(DateTime, nullable=True)
+
+    meta_verdict = Column(String, nullable=True)  # ship_it, fix_first, major_rework
+    meta_confidence = Column(Float, nullable=True)  # 0.0 - 1.0
 
     document = relationship("DbDocument", back_populates="reviews")
     comments = relationship("DbComment", back_populates="review", cascade="all, delete-orphan")

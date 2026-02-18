@@ -5,7 +5,7 @@ from typing import List
 from anthropic import AsyncAnthropic
 
 from core.config import get_settings
-from models.meta_comment import MetaComment, MetaCommentSource
+from models.meta_comment import MetaComment, MetaCommentSource, MetaSynthesisResult
 
 
 class MetaService:
@@ -43,29 +43,87 @@ class MetaService:
         groups.append(current_group)
         return groups
 
-    async def synthesize(self, comments: list[dict]) -> List[MetaComment]:
-        """Take all persona comments and synthesize into meta-review comments."""
+    def _compute_verdict(self, meta_comments: List[MetaComment]) -> str:
+        """Determine verdict based on highest priority issue found."""
+        priorities = {mc.priority for mc in meta_comments}
+        if "critical" in priorities:
+            return "major_rework"
+        if "high" in priorities:
+            return "fix_first"
+        return "ship_it"
+
+    def _compute_confidence(self, meta_comments: List[MetaComment], total_personas: int) -> float:
+        """Compute confidence score based on reviewer consensus.
+
+        Higher confidence when more reviewers agree on findings.
+        Returns a value between 0.0 and 1.0.
+        """
+        if not meta_comments or total_personas == 0:
+            return 0.0
+
+        # For each finding, calculate what fraction of total reviewers contributed
+        consensus_scores = []
+        for mc in meta_comments:
+            unique_personas = len({s.persona_id for s in mc.sources})
+            consensus_scores.append(unique_personas / total_personas)
+
+        # Average consensus across all findings
+        return round(sum(consensus_scores) / len(consensus_scores), 2)
+
+    async def synthesize(self, comments: list[dict], persona_weights: dict[str, float] | None = None) -> MetaSynthesisResult:
+        """Take all persona comments and synthesize into meta-review with verdict.
+
+        Args:
+            comments: List of comment dicts with persona_id, persona_name, etc.
+            persona_weights: Optional mapping of persona_id -> weight (float).
+        """
         if not comments:
-            return []
+            return MetaSynthesisResult(comments=[], verdict="ship_it", confidence=0.0)
 
         groups = self._group_comments_by_location(comments)
+
+        # Count unique personas
+        total_personas = len({c["persona_id"] for c in comments})
+
+        # Build persona_id -> name mapping for weight display
+        id_to_name = {c["persona_id"]: c["persona_name"] for c in comments}
 
         # Build the prompt for Claude
         groups_text = ""
         for i, group in enumerate(groups):
             groups_text += f"\n--- GROUP {i} (lines {group['start_line']+1}-{group['end_line']+1}) ---\n"
             for c in group["comments"]:
-                groups_text += f"[{c['persona_name']}]: {c['content']}\n"
+                weight_str = ""
+                if persona_weights and c.get("persona_id") in persona_weights:
+                    w = persona_weights[c["persona_id"]]
+                    if w != 1.0:
+                        weight_str = f" (weight: {w}x)"
+                groups_text += f"[{c['persona_name']}{weight_str}]: {c['content']}\n"
 
-        prompt = f"""You are a meta-reviewer producing an executive summary of feedback from multiple AI personas.
+        # Build weight guidance for the prompt
+        weight_guidance = ""
+        if persona_weights:
+            non_default = {pid: w for pid, w in persona_weights.items() if w != 1.0 and pid in id_to_name}
+            if non_default:
+                high_weight = [f"{id_to_name[pid]} ({w}x)" for pid, w in non_default.items() if w > 1.0]
+                low_weight = [f"{id_to_name[pid]} ({w}x)" for pid, w in non_default.items() if w < 1.0]
+                parts = []
+                if high_weight:
+                    parts.append(f"Higher-weight reviewers (give their feedback MORE influence): {', '.join(high_weight)}")
+                if low_weight:
+                    parts.append(f"Lower-weight reviewers (give their feedback LESS influence): {', '.join(low_weight)}")
+                weight_guidance = "\n\nReviewer weights:\n" + "\n".join(parts) + "\n"
 
-Your output is a triage dashboard — not a second review. Users drill down into individual comments for details. Your job: tell them what matters, what to fix, and whether this document is ready.
+        prompt = f"""You are a meta-reviewer producing an actionable checklist from feedback by multiple AI personas.
+
+Your output is a triage dashboard — not a second review. Each finding must be a clear, imperative action item that someone can check off.
 
 Rules:
 - MERGE similar criticisms across ALL groups into single findings. "3 personas flagged unclear terminology in sections 2-4" > repeating each one.
+- Each finding MUST be an imperative action item starting with a verb. Examples: "Add input validation for...", "Rewrite section 3 to clarify...", "Remove hardcoded credentials from..."
 - ONE sentence per finding. Two max if critical.
 - Total output: aim for 3-7 findings for the entire document. Fewer is better.
-- Be clinical: verdict + location + action. No elaboration, no teaching.
+- Be clinical: action + location + reason. No elaboration, no teaching.
 - Skip anything that's just style preference or nitpicking.
 - Group findings by theme (security, clarity, structure) not by location.
 
@@ -74,14 +132,14 @@ Priorities: critical, high, medium, low
 
 JSON array. Each element:
 - "group_index": -1 (these are document-level findings, not tied to a single group)
-- "content": the finding (1 sentence, clinical)
+- "content": the action item (imperative sentence starting with a verb)
 - "category": category
 - "priority": priority
 - "contributing_personas": persona names involved
 - "line_ranges": array of [start, end] pairs this finding covers (for highlighting)
 
 Return ONLY the JSON array.
-
+{weight_guidance}
 {groups_text}"""
 
         client = AsyncAnthropic(api_key=self.settings.anthropic_api_key)
@@ -107,7 +165,12 @@ Return ONLY the JSON array.
             print(f"[META] Synthesis failed: {e}")
             traceback.print_exc()
             # Fallback: create simple meta-comments per group without synthesis
-            return self._fallback_synthesis(groups)
+            fallback_comments = self._fallback_synthesis(groups)
+            return MetaSynthesisResult(
+                comments=fallback_comments,
+                verdict=self._compute_verdict(fallback_comments),
+                confidence=self._compute_confidence(fallback_comments, total_personas),
+            )
 
         # Build a flat list of all comments for source matching
         all_comments = []
@@ -156,7 +219,14 @@ Return ONLY the JSON array.
                 created_at=datetime.utcnow(),
             ))
 
-        return meta_comments
+        verdict = self._compute_verdict(meta_comments)
+        confidence = self._compute_confidence(meta_comments, total_personas)
+
+        return MetaSynthesisResult(
+            comments=meta_comments,
+            verdict=verdict,
+            confidence=confidence,
+        )
 
     def _fallback_synthesis(self, groups: list[dict]) -> List[MetaComment]:
         """Simple fallback when Claude synthesis fails."""
