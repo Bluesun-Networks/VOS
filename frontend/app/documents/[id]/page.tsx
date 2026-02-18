@@ -28,6 +28,13 @@ const CATEGORY_LABELS: Record<string, string> = {
   accessibility: 'Accessibility',
 };
 
+interface ConnectorLine {
+  id: string;
+  color: string;
+  x1: number; y1: number;
+  x2: number; y2: number;
+}
+
 export default function DocumentDetailPage() {
   const params = useParams();
   const searchParams = useSearchParams();
@@ -54,8 +61,13 @@ export default function DocumentDetailPage() {
   const [hoveredPersonaId, setHoveredPersonaId] = useState<string | null>(null);
   const [currentReviewId, setCurrentReviewId] = useState<string | null>(null);
 
+  // Connector lines state
+  const [connectorLines, setConnectorLines] = useState<ConnectorLine[]>([]);
+
   const abortRef = useRef<AbortController | null>(null);
   const commentsPanelRef = useRef<HTMLDivElement>(null);
+  const docPanelRef = useRef<HTMLDivElement>(null);
+  const mainAreaRef = useRef<HTMLDivElement>(null);
   const hasStartedAutoReview = useRef(false);
 
   const contentLines = document?.content?.split('\n') || [];
@@ -196,6 +208,96 @@ export default function DocumentDetailPage() {
   // Unique personas in comments for filter
   const commentPersonas = Array.from(new Map(comments.map(c => [c.persona_id, { id: c.persona_id, name: c.persona_name, color: c.persona_color }])).values());
 
+  // Compute connector lines for active comment
+  const updateConnectors = useCallback(() => {
+    if (!activeCommentId || !mainAreaRef.current) {
+      setConnectorLines([]);
+      return;
+    }
+
+    const mainRect = mainAreaRef.current.getBoundingClientRect();
+    const lines: ConnectorLine[] = [];
+
+    // Find the comment element
+    const commentEl = window.document.getElementById(`comment-${activeCommentId}`);
+    if (!commentEl) {
+      setConnectorLines([]);
+      return;
+    }
+    const commentRect = commentEl.getBoundingClientRect();
+    const commentY = commentRect.top + commentRect.height / 2 - mainRect.top;
+
+    // Determine which item is active to get start_line and color
+    let startLine: number | null = null;
+    let endLine: number | null = null;
+    let color = '#6b7280';
+
+    if (viewMode === 'meta') {
+      const mc = metaComments.find(m => m.id === activeCommentId);
+      if (mc) {
+        startLine = mc.start_line;
+        endLine = mc.end_line;
+        color = PRIORITY_COLORS[mc.priority] || PRIORITY_COLORS.medium;
+      }
+    } else {
+      const c = comments.find(c => c.id === activeCommentId);
+      if (c) {
+        startLine = c.start_line;
+        endLine = c.end_line;
+        color = c.persona_color;
+      }
+    }
+
+    if (startLine === null || endLine === null) {
+      setConnectorLines([]);
+      return;
+    }
+
+    // Find the midpoint line element
+    const midLine = Math.floor((startLine + endLine) / 2);
+    const lineEl = window.document.querySelector(`[data-line="${midLine}"]`) as HTMLElement | null;
+    if (!lineEl) {
+      setConnectorLines([]);
+      return;
+    }
+
+    const lineRect = lineEl.getBoundingClientRect();
+    const lineY = lineRect.top + lineRect.height / 2 - mainRect.top;
+    const lineX = lineRect.right - mainRect.left;
+    const commentX = commentRect.left - mainRect.left;
+
+    lines.push({
+      id: activeCommentId,
+      color,
+      x1: lineX,
+      y1: lineY,
+      x2: commentX,
+      y2: commentY,
+    });
+
+    setConnectorLines(lines);
+  }, [activeCommentId, viewMode, metaComments, comments]);
+
+  // Update connectors on scroll, resize, and when active comment changes
+  useEffect(() => {
+    updateConnectors();
+
+    const docPanel = docPanelRef.current;
+    const commentsPanel = commentsPanelRef.current;
+
+    const handler = () => updateConnectors();
+
+    docPanel?.addEventListener('scroll', handler);
+    commentsPanel?.addEventListener('scroll', handler);
+    window.addEventListener('resize', handler);
+
+    return () => {
+      docPanel?.removeEventListener('scroll', handler);
+      commentsPanel?.removeEventListener('scroll', handler);
+      window.removeEventListener('resize', handler);
+    };
+  }, [updateConnectors]);
+
   if (error) {
     return (
       <main className="min-h-screen bg-[#0a0a0f] text-[#e4e4ec] p-6">
@@ -288,9 +390,52 @@ export default function DocumentDetailPage() {
       </div>
 
       {/* Main content area */}
-      <div className="flex flex-1 overflow-hidden">
+      <div ref={mainAreaRef} className="flex flex-1 overflow-hidden relative">
+        {/* SVG connector lines overlay */}
+        {connectorLines.length > 0 && (
+          <svg
+            className="absolute inset-0 w-full h-full pointer-events-none"
+            style={{ zIndex: 10 }}
+          >
+            <defs>
+              {connectorLines.map((line) => (
+                <linearGradient
+                  key={`grad-${line.id}`}
+                  id={`connector-grad-${line.id}`}
+                  x1="0%" y1="0%" x2="100%" y2="0%"
+                >
+                  <stop offset="0%" stopColor={line.color} stopOpacity="0.6" />
+                  <stop offset="50%" stopColor={line.color} stopOpacity="0.3" />
+                  <stop offset="100%" stopColor={line.color} stopOpacity="0.6" />
+                </linearGradient>
+              ))}
+            </defs>
+            {connectorLines.map((line) => {
+              const dx = line.x2 - line.x1;
+              const cp = dx * 0.4;
+              const path = `M ${line.x1} ${line.y1} C ${line.x1 + cp} ${line.y1}, ${line.x2 - cp} ${line.y2}, ${line.x2} ${line.y2}`;
+              return (
+                <g key={line.id}>
+                  <path
+                    d={path}
+                    fill="none"
+                    stroke={`url(#connector-grad-${line.id})`}
+                    strokeWidth="2"
+                    strokeDasharray="6 4"
+                    className="animate-connector-dash"
+                  />
+                  {/* Start dot */}
+                  <circle cx={line.x1} cy={line.y1} r="3" fill={line.color} fillOpacity="0.7" />
+                  {/* End dot */}
+                  <circle cx={line.x2} cy={line.y2} r="3" fill={line.color} fillOpacity="0.7" />
+                </g>
+              );
+            })}
+          </svg>
+        )}
+
         {/* Document panel */}
-        <div className="flex-1 overflow-auto p-6">
+        <div ref={docPanelRef} className="flex-1 overflow-auto p-6">
           <div className="max-w-3xl mx-auto">
             {/* Rendered markdown with line highlighting */}
             <div className="bg-[#12121a] rounded-xl border border-[#2a2a3a] overflow-hidden">
@@ -305,6 +450,7 @@ export default function DocumentDetailPage() {
                   return (
                     <div
                       key={idx}
+                      data-line={idx}
                       className={`flex group rounded-sm transition-colors duration-200 ${hasHighlight ? 'cursor-pointer' : ''} ${isActive ? 'ring-1 ring-inset' : ''}`}
                       style={{
                         backgroundColor: hasHighlight ? `${primaryColor}${isActive ? '25' : '10'}` : undefined,
@@ -503,6 +649,10 @@ export default function DocumentDetailPage() {
                         className="p-3"
                         onClick={() => {
                           setActiveCommentId(mc.id);
+                          // Scroll to highlighted line in document
+                          const midLine = Math.floor((mc.start_line + mc.end_line) / 2);
+                          const lineEl = window.document.querySelector(`[data-line="${midLine}"]`);
+                          lineEl?.scrollIntoView({ behavior: 'smooth', block: 'center' });
                         }}
                         onMouseEnter={() => setActiveCommentId(mc.id)}
                         onMouseLeave={() => { if (!isExpanded) setActiveCommentId(null); }}
@@ -626,7 +776,8 @@ export default function DocumentDetailPage() {
                       style={{ borderLeftColor: comment.persona_color }}
                       onClick={() => {
                         setActiveCommentId(comment.id);
-                        const lineEl = window.document.querySelector(`[data-line="${comment.start_line}"]`);
+                        const midLine = Math.floor((comment.start_line + comment.end_line) / 2);
+                        const lineEl = window.document.querySelector(`[data-line="${midLine}"]`);
                         lineEl?.scrollIntoView({ behavior: 'smooth', block: 'center' });
                       }}
                       onMouseEnter={() => setActiveCommentId(comment.id)}
