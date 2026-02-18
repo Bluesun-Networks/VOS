@@ -221,10 +221,6 @@ export default function Home() {
           ))}
         </div>
 
-        {/* Nav link */}
-        <a href="/documents" className={`absolute top-5 right-6 text-xs text-neutral-500 hover:text-neutral-300 transition-colors tracking-wide uppercase ${isDragging ? 'opacity-0' : 'opacity-100'}`}>
-          Documents
-        </a>
       </div>
     </main>
   );

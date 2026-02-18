@@ -12,6 +12,7 @@ import {
 } from '@/lib/api';
 
 type ViewMode = 'meta' | 'individual';
+type DocViewMode = 'rendered' | 'annotated';
 
 const PRIORITY_COLORS: Record<string, string> = {
   critical: '#ef4444',
@@ -45,6 +46,7 @@ export default function DocumentDetailPage() {
   const [showPersonaPanel, setShowPersonaPanel] = useState(false);
   const [activeCommentId, setActiveCommentId] = useState<string | null>(null);
   const [filterPersona, setFilterPersona] = useState<string | null>(null);
+  const [docViewMode, setDocViewMode] = useState<DocViewMode>('rendered');
 
   // Meta review state
   const [viewMode, setViewMode] = useState<ViewMode>('meta');
@@ -67,12 +69,17 @@ export default function DocumentDetailPage() {
         setDocument(doc);
         setPersonas(p);
         setSelectedPersonaIds(p.map(pp => pp.id));
-        if (existingComments.length > 0 && !autoReview) {
+        if (existingComments.length > 0) {
           setComments(existingComments);
           // Load cached meta comments from the latest completed review
           const completedReview = reviews.find(r => r.status === 'completed');
           if (completedReview) {
             setCurrentReviewId(completedReview.id);
+            // If autoReview was requested but a completed review exists, skip re-review
+            if (autoReview) {
+              hasStartedAutoReview.current = true;
+              router.replace(`/documents/${docId}`);
+            }
             try {
               const cached = await fetchMetaComments(docId, completedReview.id);
               if (cached.length > 0) {
@@ -119,6 +126,7 @@ export default function DocumentDetailPage() {
     setShowPersonaPanel(false);
     setCurrentReviewId(null);
     setViewMode('individual'); // Show individual during streaming
+    setDocViewMode('annotated'); // Switch to annotated view for highlights
 
     abortRef.current = startReviewStream(
       docId,
@@ -222,7 +230,7 @@ export default function DocumentDetailPage() {
   }
 
   return (
-    <main className="h-screen bg-[#0a0a0f] text-[#e4e4ec] flex flex-col overflow-hidden">
+    <main className="flex-1 bg-[#0a0a0f] text-[#e4e4ec] flex flex-col overflow-hidden">
       {/* Top bar */}
       <div className="flex-shrink-0 border-b border-[#2a2a3a] bg-[#0c0c12] px-4 py-3">
         <div className="flex items-center justify-between">
@@ -292,52 +300,87 @@ export default function DocumentDetailPage() {
         {/* Document panel */}
         <div className="flex-1 overflow-auto p-6">
           <div className="max-w-3xl mx-auto">
-            {/* Rendered markdown with line highlighting */}
-            <div className="bg-[#12121a] rounded-xl border border-[#2a2a3a] overflow-hidden">
-              <div className="p-5 font-mono text-sm leading-relaxed">
-                {contentLines.map((line, idx) => {
-                  const lineNum = idx;
-                  const lineHighs = highlights.get(lineNum) || [];
-                  const hasHighlight = lineHighs.length > 0;
-                  const isActive = lineHighs.some(h => h.commentId === activeCommentId);
-                  const primaryColor = lineHighs[0]?.color;
-
-                  return (
-                    <div
-                      key={idx}
-                      className={`flex group rounded-sm transition-colors duration-200 ${hasHighlight ? 'cursor-pointer' : ''} ${isActive ? 'ring-1 ring-inset' : ''}`}
-                      style={{
-                        backgroundColor: hasHighlight ? `${primaryColor}${isActive ? '25' : '10'}` : undefined,
-                        borderLeft: hasHighlight ? `3px solid ${primaryColor}` : '3px solid transparent',
-                        boxShadow: isActive && primaryColor ? `inset 0 0 0 1px ${primaryColor}40` : undefined,
-                      }}
-                      onClick={() => {
-                        if (hasHighlight) {
-                          const targetId = lineHighs[0].commentId;
-                          setActiveCommentId(targetId);
-                          const el = window.document.getElementById(`comment-${targetId}`);
-                          el?.scrollIntoView({ behavior: 'smooth', block: 'center' });
-                        }
-                      }}
-                    >
-                      <span className="w-10 text-right pr-3 text-[#444] select-none flex-shrink-0 text-xs leading-6 pt-px">
-                        {idx + 1}
-                      </span>
-                      <span className="flex-1 whitespace-pre-wrap text-[#c4c4d4] leading-6 pl-2">
-                        {line || '\u00A0'}
-                      </span>
-                      {hasHighlight && (
-                        <span className="flex items-center gap-0.5 px-2 opacity-50">
-                          {lineHighs.slice(0, 3).map((h, i) => (
-                            <span key={i} className="w-1.5 h-1.5 rounded-full" style={{ backgroundColor: h.color }} />
-                          ))}
-                        </span>
-                      )}
-                    </div>
-                  );
-                })}
+            {/* Document view mode toggle */}
+            <div className="flex items-center gap-2 mb-3">
+              <div className="flex rounded-lg bg-[#12121a] p-0.5">
+                <button
+                  onClick={() => setDocViewMode('rendered')}
+                  className={`text-xs font-medium px-3 py-1 rounded-md transition-all ${
+                    docViewMode === 'rendered'
+                      ? 'bg-[#2a2a3a] text-white shadow-sm'
+                      : 'text-neutral-500 hover:text-neutral-300'
+                  }`}
+                >
+                  Rendered
+                </button>
+                <button
+                  onClick={() => setDocViewMode('annotated')}
+                  className={`text-xs font-medium px-3 py-1 rounded-md transition-all ${
+                    docViewMode === 'annotated'
+                      ? 'bg-[#2a2a3a] text-white shadow-sm'
+                      : 'text-neutral-500 hover:text-neutral-300'
+                  }`}
+                >
+                  Annotated
+                </button>
               </div>
             </div>
+
+            {docViewMode === 'rendered' ? (
+              /* Rendered markdown view */
+              <div className="bg-[#12121a] rounded-xl border border-[#2a2a3a] overflow-hidden">
+                <div className="p-6 prose-vos">
+                  <ReactMarkdown>{document.content}</ReactMarkdown>
+                </div>
+              </div>
+            ) : (
+              /* Annotated line-by-line view with highlights */
+              <div className="bg-[#12121a] rounded-xl border border-[#2a2a3a] overflow-hidden">
+                <div className="p-5 font-mono text-sm leading-relaxed">
+                  {contentLines.map((line, idx) => {
+                    const lineNum = idx;
+                    const lineHighs = highlights.get(lineNum) || [];
+                    const hasHighlight = lineHighs.length > 0;
+                    const isActive = lineHighs.some(h => h.commentId === activeCommentId);
+                    const primaryColor = lineHighs[0]?.color;
+
+                    return (
+                      <div
+                        key={idx}
+                        className={`flex group rounded-sm transition-colors duration-200 ${hasHighlight ? 'cursor-pointer' : ''} ${isActive ? 'ring-1 ring-inset' : ''}`}
+                        style={{
+                          backgroundColor: hasHighlight ? `${primaryColor}${isActive ? '25' : '10'}` : undefined,
+                          borderLeft: hasHighlight ? `3px solid ${primaryColor}` : '3px solid transparent',
+                          boxShadow: isActive && primaryColor ? `inset 0 0 0 1px ${primaryColor}40` : undefined,
+                        }}
+                        onClick={() => {
+                          if (hasHighlight) {
+                            const targetId = lineHighs[0].commentId;
+                            setActiveCommentId(targetId);
+                            const el = window.document.getElementById(`comment-${targetId}`);
+                            el?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                          }
+                        }}
+                      >
+                        <span className="w-10 text-right pr-3 text-[#444] select-none flex-shrink-0 text-xs leading-6 pt-px">
+                          {idx + 1}
+                        </span>
+                        <span className="flex-1 whitespace-pre-wrap text-[#c4c4d4] leading-6 pl-2">
+                          {line || '\u00A0'}
+                        </span>
+                        {hasHighlight && (
+                          <span className="flex items-center gap-0.5 px-2 opacity-50">
+                            {lineHighs.slice(0, 3).map((h, i) => (
+                              <span key={i} className="w-1.5 h-1.5 rounded-full" style={{ backgroundColor: h.color }} />
+                            ))}
+                          </span>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
           </div>
         </div>
 

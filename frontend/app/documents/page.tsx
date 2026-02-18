@@ -41,9 +41,6 @@ export default function DocumentsPage() {
         {/* Header */}
         <div className="flex items-center justify-between mb-10">
           <div>
-            <Link href="/" className="text-neutral-500 hover:text-neutral-300 text-xs tracking-wide uppercase mb-3 inline-block transition-colors">
-              VOS
-            </Link>
             <h1 className="text-2xl font-bold tracking-tight">Documents</h1>
           </div>
           <label className="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 rounded-lg text-sm font-medium transition-colors cursor-pointer">
