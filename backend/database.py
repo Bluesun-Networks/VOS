@@ -1,10 +1,33 @@
+import logging
+
 from sqlalchemy import create_engine, Column, String, Text, DateTime, Integer, Float, Boolean, ForeignKey, JSON
 from sqlalchemy.orm import declarative_base, sessionmaker, relationship
 from datetime import datetime
 
-DATABASE_URL = "sqlite:///./vos.db"
+from core.config import get_settings
 
-engine = create_engine(DATABASE_URL, connect_args={"check_same_thread": False})
+logger = logging.getLogger("vos.db")
+
+_settings = get_settings()
+DATABASE_URL = _settings.database_url
+
+
+def _build_engine(url: str):
+    """Create a SQLAlchemy engine with driver-appropriate settings."""
+    if url.startswith("sqlite"):
+        # SQLite: single-threaded, no connection pool needed
+        return create_engine(url, connect_args={"check_same_thread": False})
+    else:
+        # PostgreSQL (or other): use connection pooling
+        return create_engine(
+            url,
+            pool_size=5,
+            max_overflow=10,
+            pool_pre_ping=True,  # verify connections before checkout
+        )
+
+
+engine = _build_engine(DATABASE_URL)
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 Base = declarative_base()
 
@@ -110,6 +133,8 @@ class DbMetaComment(Base):
 
 def init_db():
     Base.metadata.create_all(bind=engine)
+    db_type = "PostgreSQL" if "postgresql" in DATABASE_URL else "SQLite"
+    logger.info("Database initialized (%s)", db_type)
 
 
 def get_db():

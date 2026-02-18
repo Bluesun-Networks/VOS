@@ -26,7 +26,7 @@ def upgrade() -> None:
         sa.Column('description', sa.Text(), nullable=True),
         sa.Column('content', sa.Text(), nullable=False),
         sa.Column('repo_path', sa.String(), nullable=True),
-        sa.Column('is_archived', sa.Boolean(), nullable=False, server_default='0'),
+        sa.Column('is_archived', sa.Boolean(), nullable=False, server_default=sa.text('false')),
         sa.Column('created_at', sa.DateTime()),
         sa.Column('updated_at', sa.DateTime()),
     )

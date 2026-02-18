@@ -58,9 +58,11 @@ async def system_status(db: Session = Depends(get_db)):
     checks = []
 
     # 1. Database connectivity
+    is_pg = "postgresql" in DATABASE_URL
+    db_label = "PostgreSQL" if is_pg else "SQLite"
     try:
         db.execute(text("SELECT 1"))
-        checks.append(CheckDetail(name="database", status="healthy", message="SQLite connection OK"))
+        checks.append(CheckDetail(name="database", status="healthy", message=f"{db_label} connection OK"))
     except Exception as e:
         checks.append(CheckDetail(name="database", status="unhealthy", message=f"Database error: {e}"))
 
@@ -79,32 +81,33 @@ async def system_status(db: Session = Depends(get_db)):
             message="ANTHROPIC_API_KEY is not set",
         ))
 
-    # 3. Disk space for SQLite DB
-    db_path = DATABASE_URL.replace("sqlite:///", "")
-    db_dir = os.path.dirname(os.path.abspath(db_path)) if db_path else "."
-    try:
-        disk = shutil.disk_usage(db_dir)
-        free_mb = disk.free / (1024 * 1024)
-        if free_mb > 100:
-            checks.append(CheckDetail(
-                name="disk_space",
-                status="healthy",
-                message=f"{free_mb:.0f} MB free",
-            ))
-        elif free_mb > 10:
-            checks.append(CheckDetail(
-                name="disk_space",
-                status="degraded",
-                message=f"Low disk space: {free_mb:.0f} MB free",
-            ))
-        else:
-            checks.append(CheckDetail(
-                name="disk_space",
-                status="unhealthy",
-                message=f"Critical disk space: {free_mb:.0f} MB free",
-            ))
-    except Exception as e:
-        checks.append(CheckDetail(name="disk_space", status="unhealthy", message=f"Disk check failed: {e}"))
+    # 3. Disk space (only relevant for SQLite; PG manages its own storage)
+    if not is_pg:
+        db_path = DATABASE_URL.replace("sqlite:///", "")
+        db_dir = os.path.dirname(os.path.abspath(db_path)) if db_path else "."
+        try:
+            disk = shutil.disk_usage(db_dir)
+            free_mb = disk.free / (1024 * 1024)
+            if free_mb > 100:
+                checks.append(CheckDetail(
+                    name="disk_space",
+                    status="healthy",
+                    message=f"{free_mb:.0f} MB free",
+                ))
+            elif free_mb > 10:
+                checks.append(CheckDetail(
+                    name="disk_space",
+                    status="degraded",
+                    message=f"Low disk space: {free_mb:.0f} MB free",
+                ))
+            else:
+                checks.append(CheckDetail(
+                    name="disk_space",
+                    status="unhealthy",
+                    message=f"Critical disk space: {free_mb:.0f} MB free",
+                ))
+        except Exception as e:
+            checks.append(CheckDetail(name="disk_space", status="unhealthy", message=f"Disk check failed: {e}"))
 
     # Overall status: worst of all checks
     statuses = [c.status for c in checks]

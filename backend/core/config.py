@@ -4,6 +4,7 @@ from functools import lru_cache
 
 class Settings(BaseSettings):
     anthropic_api_key: str = ""
+    database_url: str = "sqlite:///./vos.db"
     repos_base_path: str = "/tmp/vos-repos"
     debug: bool = False
     rate_limit_enabled: bool = True

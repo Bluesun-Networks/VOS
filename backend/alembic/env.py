@@ -1,3 +1,4 @@
+import os
 import sys
 from pathlib import Path
 from logging.config import fileConfig
@@ -12,8 +13,10 @@ from database import Base, DATABASE_URL  # noqa: E402
 
 config = context.config
 
-# Override sqlalchemy.url from our database module
-config.set_main_option("sqlalchemy.url", DATABASE_URL)
+# Use DATABASE_URL from env (if set) or fall back to the app config.
+# This allows `alembic upgrade head` to work with any DATABASE_URL.
+effective_url = os.environ.get("DATABASE_URL", DATABASE_URL)
+config.set_main_option("sqlalchemy.url", effective_url)
 
 if config.config_file_name is not None:
     fileConfig(config.config_file_name)
