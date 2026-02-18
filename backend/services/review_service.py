@@ -1,4 +1,5 @@
 import asyncio
+import logging
 import uuid
 import re
 from datetime import datetime
@@ -8,7 +9,10 @@ from anthropic import AsyncAnthropic
 from models.persona import Persona, PersonaTone
 from models.comment import Comment, CommentAnchor
 from core.config import get_settings
+from core.errors import classify_anthropic_error
 from database import SessionLocal, DbPersona
+
+logger = logging.getLogger("vos.review")
 
 PERSONAS = [
     Persona(
@@ -324,9 +328,14 @@ Your comments should reflect your unique perspective and expertise."""
                     )
                     comments.append(comment)
         except Exception as e:
+            vos_err = classify_anthropic_error(e)
+            logger.error(
+                "Persona '%s' review failed [%s]: %s",
+                persona.name, vos_err.code, vos_err.message,
+            )
             comments.append(Comment(
                 id=str(uuid.uuid4())[:8],
-                content=f"Review failed: {str(e)}",
+                content=f"⚠ Review error: {vos_err.message}",
                 anchor=CommentAnchor(file_path="document.md", start_line=0, end_line=0),
                 persona_id=persona.id,
                 persona_name=persona.name,

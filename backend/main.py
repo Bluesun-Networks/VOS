@@ -1,11 +1,20 @@
+import logging
+
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from api import api_router
 from core.config import get_settings
+from core.errors import VosError, vos_error_handler, unhandled_error_handler
 from core.security import RateLimitMiddleware, CSRFMiddleware
 from database import init_db
 from services.review_service import seed_default_personas
+
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s %(levelname)-5s [%(name)s] %(message)s",
+    datefmt="%H:%M:%S",
+)
 
 settings = get_settings()
 
@@ -16,6 +25,10 @@ app = FastAPI(
     docs_url="/docs",
     redoc_url="/redoc",
 )
+
+# Exception handlers — structured JSON for all errors
+app.add_exception_handler(VosError, vos_error_handler)
+app.add_exception_handler(Exception, unhandled_error_handler)
 
 app.add_middleware(
     CORSMiddleware,

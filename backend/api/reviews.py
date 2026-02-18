@@ -97,7 +97,12 @@ async def upload_document(file: UploadFile = File(...), db: Session = Depends(ge
         raise HTTPException(status_code=400, detail="Only .md files are supported")
 
     content = await file.read()
-    content_str = content.decode('utf-8')
+    try:
+        content_str = content.decode('utf-8')
+    except UnicodeDecodeError:
+        raise HTTPException(status_code=400, detail="File is not valid UTF-8 text. Please upload a UTF-8 encoded markdown file.")
+    if not content_str.strip():
+        raise HTTPException(status_code=400, detail="File is empty")
     title = extract_title_from_markdown(content_str, file.filename)
 
     doc_id = str(uuid.uuid4())[:8]
@@ -115,6 +120,8 @@ async def upload_document(file: UploadFile = File(...), db: Session = Depends(ge
 
 @router.post("/upload/raw", response_model=UploadResponse)
 async def upload_raw(req: RawUploadRequest, db: Session = Depends(get_db)):
+    if not req.content.strip():
+        raise HTTPException(status_code=400, detail="Content cannot be empty")
     title = req.title or extract_title_from_markdown(req.content, "untitled.md")
 
     doc_id = str(uuid.uuid4())[:8]
@@ -227,12 +234,27 @@ async def start_review(doc_id: str, request: ReviewRequest, db: Session = Depend
                     finally:
                         persist_db.close()
         except Exception as e:
+            from core.errors import classify_anthropic_error
+            import logging
+            err_logger = logging.getLogger("vos.review")
+
+            vos_err = classify_anthropic_error(e)
+            err_logger.error("Review stream failed [%s]: %s", vos_err.code, vos_err.message)
+
+            # Emit error event to frontend before closing stream
+            error_event = {
+                "type": "error",
+                "error": vos_err.code,
+                "detail": vos_err.message,
+            }
+            yield f"data: {json.dumps(error_event)}\n\n"
+
             persist_db = next(get_db())
             try:
                 job = persist_db.query(DbReviewJob).filter(DbReviewJob.id == job_id).first()
                 if job:
                     job.status = "failed"
-                    job.error_message = str(e)
+                    job.error_message = vos_err.message
                     job.completed_at = datetime.utcnow()
                 review = persist_db.query(DbReview).filter(DbReview.id == review_id).first()
                 if review:
@@ -241,7 +263,6 @@ async def start_review(doc_id: str, request: ReviewRequest, db: Session = Depend
                 persist_db.commit()
             finally:
                 persist_db.close()
-            raise
 
     return StreamingResponse(
         generate(),

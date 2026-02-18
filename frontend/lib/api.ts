@@ -1,5 +1,40 @@
 import { API_BASE_URL } from './config';
 
+// ---------- Structured error handling ----------
+
+export class VosApiError extends Error {
+  code: string;
+  detail: string;
+  status: number;
+
+  constructor(status: number, code: string, detail: string) {
+    super(detail);
+    this.name = 'VosApiError';
+    this.status = status;
+    this.code = code;
+    this.detail = detail;
+  }
+}
+
+/**
+ * Extract a structured error from a failed fetch response.
+ * Falls back to a generic message if the body isn't our ErrorResponse shape.
+ */
+async function throwApiError(res: Response, fallback: string): Promise<never> {
+  let code = 'unknown';
+  let detail = fallback;
+  try {
+    const body = await res.json();
+    if (body.error) code = body.error;
+    if (body.detail) detail = body.detail;
+  } catch {
+    // body wasn't JSON — use the fallback message
+  }
+  throw new VosApiError(res.status, code, detail);
+}
+
+// ---------- Interfaces ----------
+
 export interface Document {
   id: string;
   title: string;
@@ -77,19 +112,19 @@ export interface MetaReview {
 export async function fetchDocuments(includeArchived = false): Promise<Document[]> {
   const params = includeArchived ? '?include_archived=true' : '';
   const res = await fetch(`${API_BASE_URL}/api/v1/documents/${params}`);
-  if (!res.ok) throw new Error('Failed to fetch documents');
+  if (!res.ok) await throwApiError(res, 'Failed to fetch documents');
   return res.json();
 }
 
 export async function fetchDocument(id: string): Promise<Document> {
   const res = await fetch(`${API_BASE_URL}/api/v1/documents/${id}`);
-  if (!res.ok) throw new Error('Failed to fetch document');
+  if (!res.ok) await throwApiError(res, 'Failed to fetch document');
   return res.json();
 }
 
 export async function fetchPersonas(): Promise<Persona[]> {
   const res = await fetch(`${API_BASE_URL}/api/v1/personas/`);
-  if (!res.ok) throw new Error('Failed to fetch personas');
+  if (!res.ok) await throwApiError(res, 'Failed to fetch personas');
   return res.json();
 }
 
@@ -99,7 +134,7 @@ export async function updatePersona(personaId: string, data: { weight?: number }
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(data),
   });
-  if (!res.ok) throw new Error('Failed to update persona');
+  if (!res.ok) await throwApiError(res, 'Failed to update persona');
   return res.json();
 }
 
@@ -110,7 +145,7 @@ export async function uploadFile(file: File): Promise<{ document_id: string; tit
     method: 'POST',
     body: formData,
   });
-  if (!res.ok) throw new Error('Upload failed');
+  if (!res.ok) await throwApiError(res, 'Upload failed');
   return res.json();
 }
 
@@ -120,13 +155,13 @@ export async function uploadRaw(content: string, title?: string): Promise<{ docu
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ content, title }),
   });
-  if (!res.ok) throw new Error('Upload failed');
+  if (!res.ok) await throwApiError(res, 'Upload failed');
   return res.json();
 }
 
 export async function fetchReviews(docId: string): Promise<ReviewSummary[]> {
   const res = await fetch(`${API_BASE_URL}/api/v1/reviews/${docId}/reviews`);
-  if (!res.ok) throw new Error('Failed to fetch reviews');
+  if (!res.ok) await throwApiError(res, 'Failed to fetch reviews');
   return res.json();
 }
 
@@ -140,7 +175,7 @@ export async function synthesizeMetaReview(docId: string, reviewId: string): Pro
   const res = await fetch(`${API_BASE_URL}/api/v1/reviews/${docId}/reviews/${reviewId}/meta`, {
     method: 'POST',
   });
-  if (!res.ok) throw new Error('Failed to synthesize meta review');
+  if (!res.ok) await throwApiError(res, 'Failed to synthesize meta review');
   return res.json();
 }
 
@@ -154,7 +189,7 @@ export async function archiveDocument(docId: string): Promise<Document> {
   const res = await fetch(`${API_BASE_URL}/api/v1/documents/${docId}/archive`, {
     method: 'POST',
   });
-  if (!res.ok) throw new Error('Failed to archive document');
+  if (!res.ok) await throwApiError(res, 'Failed to archive document');
   return res.json();
 }
 
@@ -162,7 +197,7 @@ export async function restoreDocument(docId: string): Promise<Document> {
   const res = await fetch(`${API_BASE_URL}/api/v1/documents/${docId}/restore`, {
     method: 'POST',
   });
-  if (!res.ok) throw new Error('Failed to restore document');
+  if (!res.ok) await throwApiError(res, 'Failed to restore document');
   return res.json();
 }
 
@@ -170,7 +205,7 @@ export async function deleteDocument(docId: string): Promise<void> {
   const res = await fetch(`${API_BASE_URL}/api/v1/documents/${docId}`, {
     method: 'DELETE',
   });
-  if (!res.ok) throw new Error('Failed to delete document');
+  if (!res.ok) await throwApiError(res, 'Failed to delete document');
 }
 
 export function startReviewStream(
@@ -185,6 +220,8 @@ export function startReviewStream(
     comment?: Comment;
     total_comments?: number;
     review_id?: string;
+    error?: string;
+    detail?: string;
   }) => void,
   onError: (err: Error) => void,
 ): AbortController {
@@ -199,7 +236,7 @@ export function startReviewStream(
         signal: controller.signal,
       });
 
-      if (!res.ok) throw new Error('Failed to start review');
+      if (!res.ok) await throwApiError(res, 'Failed to start review');
 
       const reader = res.body?.getReader();
       const decoder = new TextDecoder();
@@ -218,7 +255,16 @@ export function startReviewStream(
           if (line.startsWith('data: ')) {
             try {
               const data = JSON.parse(line.slice(6));
-              onEvent(data);
+              // Surface SSE error events as proper errors
+              if (data.type === 'error') {
+                onError(new VosApiError(
+                  502,
+                  data.error || 'stream_error',
+                  data.detail || 'Review stream encountered an error',
+                ));
+              } else {
+                onEvent(data);
+              }
             } catch {
               // skip malformed SSE lines
             }

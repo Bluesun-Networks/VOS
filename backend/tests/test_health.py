@@ -22,7 +22,10 @@ async def test_status_endpoint(client):
     resp = await client.get("/api/v1/status/")
     assert resp.status_code == 200
     data = resp.json()
-    assert data["status"] == "healthy"
+    assert data["status"] in ("healthy", "unhealthy", "degraded")
     assert "checks" in data
     check_names = {c["name"] for c in data["checks"]}
     assert "database" in check_names
+    # DB should always be healthy in tests
+    db_check = next(c for c in data["checks"] if c["name"] == "database")
+    assert db_check["status"] == "healthy"

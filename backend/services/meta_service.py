@@ -1,3 +1,4 @@
+import logging
 import uuid
 import json
 from datetime import datetime
@@ -5,7 +6,10 @@ from typing import List
 from anthropic import AsyncAnthropic
 
 from core.config import get_settings
+from core.errors import classify_anthropic_error
 from models.meta_comment import MetaComment, MetaCommentSource, MetaSynthesisResult
+
+logger = logging.getLogger("vos.meta")
 
 
 class MetaService:
@@ -161,9 +165,8 @@ Return ONLY the JSON array.
 
             synthesis = json.loads(response_text)
         except Exception as e:
-            import traceback
-            print(f"[META] Synthesis failed: {e}")
-            traceback.print_exc()
+            vos_err = classify_anthropic_error(e)
+            logger.error("Meta synthesis failed [%s]: %s", vos_err.code, vos_err.message, exc_info=True)
             # Fallback: create simple meta-comments per group without synthesis
             fallback_comments = self._fallback_synthesis(groups)
             return MetaSynthesisResult(
