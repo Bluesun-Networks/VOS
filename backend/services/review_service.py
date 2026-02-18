@@ -8,13 +8,14 @@ from anthropic import AsyncAnthropic
 from models.persona import Persona, PersonaTone
 from models.comment import Comment, CommentAnchor
 from core.config import get_settings
+from database import SessionLocal, DbPersona
 
-PERSONAS = [
-    Persona(
-        id="devils-advocate",
-        name="Devil's Advocate",
-        description="Challenges every assumption and plays contrarian",
-        system_prompt="""You are a ruthless Devil's Advocate. Your purpose is to stress-test every claim in this document.
+DEFAULT_PERSONAS = [
+    {
+        "id": "devils-advocate",
+        "name": "Devil's Advocate",
+        "description": "Challenges every assumption and plays contrarian",
+        "system_prompt": """You are a ruthless Devil's Advocate. Your purpose is to stress-test every claim in this document.
 
 Your approach:
 - Challenge EVERY assumption, especially the ones that seem obvious
@@ -27,15 +28,18 @@ Your approach:
 Tone: Sharp, provocative, but intellectually honest. You're not being mean — you're making the work stronger by finding its cracks before someone else does.
 
 Keep each comment to 2-3 sentences. Be specific about what you're challenging and why.""",
-        tone=PersonaTone.DEVIL_ADVOCATE,
-        focus_areas=["logic", "assumptions", "evidence", "counterarguments"],
-        color="#ef4444"
-    ),
-    Persona(
-        id="supportive-editor",
-        name="Supportive Editor",
-        description="Finds strengths and encourages while improving",
-        system_prompt="""You are a warm, experienced editor who genuinely wants this work to succeed.
+        "tone": "devil_advocate",
+        "focus_areas": ["logic", "assumptions", "evidence", "counterarguments"],
+        "color": "#ef4444",
+        "is_default": True,
+        "sort_order": 0,
+        "color_theme": "#ef4444",
+    },
+    {
+        "id": "supportive-editor",
+        "name": "Supportive Editor",
+        "description": "Finds strengths and encourages while improving",
+        "system_prompt": """You are a warm, experienced editor who genuinely wants this work to succeed.
 
 Your approach:
 - Lead with what's working well — be specific about strong passages
@@ -48,15 +52,18 @@ Your approach:
 Tone: Encouraging and constructive. Like a mentor who sees potential and helps realize it. Never condescending.
 
 Keep each comment to 2-3 sentences. Be genuine — don't manufacture praise.""",
-        tone=PersonaTone.SUPPORTIVE,
-        focus_areas=["strengths", "potential", "encouragement", "craft"],
-        color="#22c55e"
-    ),
-    Persona(
-        id="technical-architect",
-        name="Technical Architect",
-        description="Evaluates technical design, scalability, and patterns",
-        system_prompt="""You are a principal software architect with 20+ years of experience reviewing technical documents.
+        "tone": "supportive",
+        "focus_areas": ["strengths", "potential", "encouragement", "craft"],
+        "color": "#22c55e",
+        "is_default": True,
+        "sort_order": 1,
+        "color_theme": "#22c55e",
+    },
+    {
+        "id": "technical-architect",
+        "name": "Technical Architect",
+        "description": "Evaluates technical design, scalability, and patterns",
+        "system_prompt": """You are a principal software architect with 20+ years of experience reviewing technical documents.
 
 Your approach:
 - Evaluate architectural decisions and their long-term implications
@@ -69,15 +76,18 @@ Your approach:
 Tone: Precise and technical. You speak in specifics, not generalities. Reference industry standards and best practices when relevant.
 
 Keep each comment to 2-3 sentences. Be actionable — say what should change and why.""",
-        tone=PersonaTone.TECHNICAL,
-        focus_areas=["architecture", "scalability", "performance", "design patterns"],
-        color="#3b82f6"
-    ),
-    Persona(
-        id="casual-reader",
-        name="Casual Reader",
-        description="Represents the confused layperson perspective",
-        system_prompt="""You are an intelligent but non-expert reader encountering this document for the first time. You have no domain expertise.
+        "tone": "technical",
+        "focus_areas": ["architecture", "scalability", "performance", "design patterns"],
+        "color": "#3b82f6",
+        "is_default": True,
+        "sort_order": 2,
+        "color_theme": "#3b82f6",
+    },
+    {
+        "id": "casual-reader",
+        "name": "Casual Reader",
+        "description": "Represents the confused layperson perspective",
+        "system_prompt": """You are an intelligent but non-expert reader encountering this document for the first time. You have no domain expertise.
 
 Your approach:
 - Flag every moment of confusion: "I don't understand what X means"
@@ -90,15 +100,18 @@ Your approach:
 Tone: Honest and unashamed. Your confusion is the most valuable feedback. Don't pretend to understand.
 
 Keep each comment to 2-3 sentences. Be specific about exactly where you got lost.""",
-        tone=PersonaTone.NEUTRAL,
-        focus_areas=["accessibility", "engagement", "confusion", "jargon"],
-        color="#eab308"
-    ),
-    Persona(
-        id="security-reviewer",
-        name="Security Reviewer",
-        description="Hunts for security vulnerabilities and data risks",
-        system_prompt="""You are a senior security engineer and threat modeler. Every document is a potential attack surface.
+        "tone": "neutral",
+        "focus_areas": ["accessibility", "engagement", "confusion", "jargon"],
+        "color": "#eab308",
+        "is_default": True,
+        "sort_order": 3,
+        "color_theme": "#eab308",
+    },
+    {
+        "id": "security-reviewer",
+        "name": "Security Reviewer",
+        "description": "Hunts for security vulnerabilities and data risks",
+        "system_prompt": """You are a senior security engineer and threat modeler. Every document is a potential attack surface.
 
 Your approach:
 - Identify security vulnerabilities: injection, auth bypass, data exposure, SSRF, etc.
@@ -111,15 +124,18 @@ Your approach:
 Tone: Urgent but professional. Security issues are not theoretical — they're bugs waiting to be exploited. Prioritize by severity.
 
 Keep each comment to 2-3 sentences. Classify severity: CRITICAL / HIGH / MEDIUM / LOW.""",
-        tone=PersonaTone.CRITICAL,
-        focus_areas=["security", "privacy", "authentication", "vulnerabilities", "compliance"],
-        color="#f97316"
-    ),
-    Persona(
-        id="accessibility-advocate",
-        name="Accessibility Advocate",
-        description="Champions inclusive design and universal access",
-        system_prompt="""You are an accessibility specialist who ensures content and systems work for everyone.
+        "tone": "critical",
+        "focus_areas": ["security", "privacy", "authentication", "vulnerabilities", "compliance"],
+        "color": "#f97316",
+        "is_default": True,
+        "sort_order": 4,
+        "color_theme": "#f97316",
+    },
+    {
+        "id": "accessibility-advocate",
+        "name": "Accessibility Advocate",
+        "description": "Champions inclusive design and universal access",
+        "system_prompt": """You are an accessibility specialist who ensures content and systems work for everyone.
 
 Your approach:
 - Check if the document considers users with disabilities
@@ -132,15 +148,18 @@ Your approach:
 Tone: Passionate but practical. Accessibility isn't nice-to-have — it's a requirement. Suggest specific fixes.
 
 Keep each comment to 2-3 sentences. Reference WCAG guidelines when applicable.""",
-        tone=PersonaTone.SUPPORTIVE,
-        focus_areas=["accessibility", "inclusivity", "WCAG", "usability"],
-        color="#8b5cf6"
-    ),
-    Persona(
-        id="executive-summary",
-        name="Executive Summarizer",
-        description="Distills documents into strategic takeaways",
-        system_prompt="""You are a C-suite advisor who translates detailed documents into executive-level insights.
+        "tone": "supportive",
+        "focus_areas": ["accessibility", "inclusivity", "WCAG", "usability"],
+        "color": "#8b5cf6",
+        "is_default": True,
+        "sort_order": 5,
+        "color_theme": "#8b5cf6",
+    },
+    {
+        "id": "executive-summary",
+        "name": "Executive Summarizer",
+        "description": "Distills documents into strategic takeaways",
+        "system_prompt": """You are a C-suite advisor who translates detailed documents into executive-level insights.
 
 Your approach:
 - Identify the 3 most important takeaways
@@ -153,11 +172,28 @@ Your approach:
 Tone: Direct and strategic. No fluff. Think in terms of impact, risk, and priority. Executives have 2 minutes — make it count.
 
 Keep each comment to 2-3 sentences. Focus on what matters for decision-making.""",
-        tone=PersonaTone.NEUTRAL,
-        focus_areas=["strategy", "ROI", "risk", "decisions", "metrics"],
-        color="#06b6d4"
-    ),
+        "tone": "neutral",
+        "focus_areas": ["strategy", "ROI", "risk", "decisions", "metrics"],
+        "color": "#06b6d4",
+        "is_default": True,
+        "sort_order": 6,
+        "color_theme": "#06b6d4",
+    },
 ]
+
+
+def seed_default_personas():
+    """Seed the database with default personas if they don't exist."""
+    db = SessionLocal()
+    try:
+        existing = db.query(DbPersona).filter(DbPersona.is_default == True).count()
+        if existing == 0:
+            for p_data in DEFAULT_PERSONAS:
+                db_p = DbPersona(**p_data)
+                db.add(db_p)
+            db.commit()
+    finally:
+        db.close()
 
 
 class ReviewService:
@@ -165,13 +201,81 @@ class ReviewService:
 
     def __init__(self):
         self.settings = get_settings()
-        self._personas = {p.id: p for p in PERSONAS}
+
+    def _get_personas_from_db(self, persona_ids: Optional[List[str]] = None, active_only: bool = True) -> List[Persona]:
+        """Load personas from DB, optionally filtered by IDs and active status."""
+        db = SessionLocal()
+        try:
+            query = db.query(DbPersona)
+            if active_only:
+                query = query.filter(DbPersona.is_active == True)
+            if persona_ids:
+                query = query.filter(DbPersona.id.in_(persona_ids))
+            db_personas = query.order_by(DbPersona.sort_order, DbPersona.name).all()
+            return [
+                Persona(
+                    id=p.id,
+                    name=p.name,
+                    description=p.description,
+                    system_prompt=p.system_prompt,
+                    tone=p.tone,
+                    focus_areas=p.focus_areas or [],
+                    color=p.color,
+                    output_requirements=p.output_requirements,
+                    reference_notes=p.reference_notes,
+                    examples=p.examples,
+                    is_default=p.is_default,
+                    is_active=p.is_active,
+                    sort_order=p.sort_order,
+                    color_theme=p.color_theme,
+                )
+                for p in db_personas
+            ]
+        finally:
+            db.close()
 
     def get_persona(self, persona_id: str) -> Optional[Persona]:
-        return self._personas.get(persona_id)
+        db = SessionLocal()
+        try:
+            db_p = db.query(DbPersona).filter(DbPersona.id == persona_id).first()
+            if not db_p:
+                return None
+            return Persona(
+                id=db_p.id,
+                name=db_p.name,
+                description=db_p.description,
+                system_prompt=db_p.system_prompt,
+                tone=db_p.tone,
+                focus_areas=db_p.focus_areas or [],
+                color=db_p.color,
+                output_requirements=db_p.output_requirements,
+                reference_notes=db_p.reference_notes,
+                examples=db_p.examples,
+                is_default=db_p.is_default,
+                is_active=db_p.is_active,
+                sort_order=db_p.sort_order,
+                color_theme=db_p.color_theme,
+            )
+        finally:
+            db.close()
 
     def list_personas(self) -> List[Persona]:
-        return list(self._personas.values())
+        return self._get_personas_from_db(active_only=False)
+
+    def _build_system_prompt(self, persona: Persona) -> str:
+        """Build the full system prompt incorporating new persona fields."""
+        parts = [persona.system_prompt]
+
+        if persona.reference_notes:
+            parts.append(f"\n\nReference Notes:\n{persona.reference_notes}")
+
+        if persona.output_requirements:
+            parts.append(f"\n\nOutput Format Requirements:\n{persona.output_requirements}")
+
+        if persona.examples:
+            parts.append(f"\n\nExamples:\n{persona.examples}")
+
+        return "\n".join(parts)
 
     def _parse_document_structure(self, content: str) -> List[dict]:
         """Parse markdown into paragraphs with positions"""
@@ -217,6 +321,8 @@ class ReviewService:
         """Run a single persona's review and return all comments"""
         client = AsyncAnthropic(api_key=self.settings.anthropic_api_key)
 
+        system_prompt = self._build_system_prompt(persona)
+
         prompt = f"""Review this document and provide specific, actionable comments.
 
 Document:
@@ -236,7 +342,7 @@ Your comments should reflect your unique perspective and expertise."""
             async with client.messages.stream(
                 model=model,
                 max_tokens=1024,
-                system=persona.system_prompt,
+                system=system_prompt,
                 messages=[{"role": "user", "content": prompt}]
             ) as stream:
                 full_response = ""
@@ -291,8 +397,10 @@ Your comments should reflect your unique perspective and expertise."""
     ) -> AsyncGenerator[dict, None]:
         """Stream review events: persona status updates + comments as they arrive"""
 
-        personas = [self._personas[pid] for pid in (persona_ids or self._personas.keys())
-                    if pid in self._personas]
+        if persona_ids:
+            personas = self._get_personas_from_db(persona_ids=persona_ids, active_only=True)
+        else:
+            personas = self._get_personas_from_db(active_only=True)
 
         paragraphs = self._parse_document_structure(content)
 

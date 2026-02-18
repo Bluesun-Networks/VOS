@@ -8,7 +8,7 @@ from pydantic import BaseModel
 from sqlalchemy.orm import Session
 import json
 
-from database import get_db, DbDocument, DbReview, DbComment, DbMetaComment
+from database import get_db, DbDocument, DbReview, DbReviewJob, DbComment, DbMetaComment
 from services.review_service import ReviewService
 from services.meta_service import MetaService
 
@@ -135,8 +135,24 @@ async def start_review(doc_id: str, request: ReviewRequest, db: Session = Depend
     if not db_doc:
         raise HTTPException(status_code=404, detail="Document not found")
 
-    persona_ids = request.persona_ids or [p.id for p in review_service.list_personas()]
-    valid_ids = [pid for pid in persona_ids if review_service.get_persona(pid)]
+    if request.persona_ids:
+        valid_ids = [pid for pid in request.persona_ids if review_service.get_persona(pid)]
+    else:
+        valid_ids = [p.id for p in review_service.list_personas()]
+
+    model_name = request.model or "claude-sonnet-4-5-20250929"
+
+    # Create job record
+    job_id = str(uuid.uuid4())[:8]
+    db_job = DbReviewJob(
+        id=job_id,
+        document_id=doc_id,
+        status="queued",
+        provider="anthropic",
+        model=model_name,
+        trigger="manual",
+    )
+    db.add(db_job)
 
     review_id = str(uuid.uuid4())[:8]
     db_review = DbReview(
@@ -144,55 +160,82 @@ async def start_review(doc_id: str, request: ReviewRequest, db: Session = Depend
         document_id=doc_id,
         persona_ids=valid_ids,
         status="running",
+        job_id=job_id,
     )
     db.add(db_review)
+
+    # Mark job as running
+    db_job.status = "running"
     db.commit()
 
     doc_content = db_doc.content
 
     async def generate():
         all_comments = []
-        async for event in review_service.review_document(
-            document_id=doc_id,
-            content=doc_content,
-            version_hash="HEAD",
-            persona_ids=valid_ids,
-            model=request.model or "claude-sonnet-4-5-20250929",
-        ):
-            # Inject review_id into done event so frontend can call meta endpoint
-            if event.get("type") == "done":
-                event["review_id"] = review_id
+        try:
+            async for event in review_service.review_document(
+                document_id=doc_id,
+                content=doc_content,
+                version_hash="HEAD",
+                persona_ids=valid_ids,
+                model=model_name,
+            ):
+                # Inject review_id into done event so frontend can call meta endpoint
+                if event.get("type") == "done":
+                    event["review_id"] = review_id
+                    event["job_id"] = job_id
 
-            yield f"data: {json.dumps(event, default=str)}\n\n"
+                yield f"data: {json.dumps(event, default=str)}\n\n"
 
-            if event.get("type") == "comment":
-                all_comments.append(event["comment"])
+                if event.get("type") == "comment":
+                    all_comments.append(event["comment"])
 
-            if event.get("type") == "done":
-                persist_db = next(get_db())
-                try:
-                    for c in all_comments:
-                        db_comment = DbComment(
-                            id=c["id"],
-                            review_id=review_id,
-                            document_id=doc_id,
-                            persona_id=c["persona_id"],
-                            persona_name=c["persona_name"],
-                            persona_color=c["persona_color"],
-                            content=c["content"],
-                            start_line=c["anchor"]["start_line"],
-                            end_line=c["anchor"]["end_line"],
-                        )
-                        persist_db.add(db_comment)
+                if event.get("type") == "done":
+                    persist_db = next(get_db())
+                    try:
+                        for c in all_comments:
+                            db_comment = DbComment(
+                                id=c["id"],
+                                review_id=review_id,
+                                document_id=doc_id,
+                                persona_id=c["persona_id"],
+                                persona_name=c["persona_name"],
+                                persona_color=c["persona_color"],
+                                content=c["content"],
+                                start_line=c["anchor"]["start_line"],
+                                end_line=c["anchor"]["end_line"],
+                            )
+                            persist_db.add(db_comment)
 
-                    review = persist_db.query(DbReview).filter(DbReview.id == review_id).first()
-                    if review:
-                        review.status = "completed"
-                        review.completed_at = datetime.utcnow()
+                        review = persist_db.query(DbReview).filter(DbReview.id == review_id).first()
+                        if review:
+                            review.status = "completed"
+                            review.completed_at = datetime.utcnow()
 
-                    persist_db.commit()
-                finally:
-                    persist_db.close()
+                        job = persist_db.query(DbReviewJob).filter(DbReviewJob.id == job_id).first()
+                        if job:
+                            job.status = "completed"
+                            job.completed_at = datetime.utcnow()
+
+                        persist_db.commit()
+                    finally:
+                        persist_db.close()
+        except Exception as e:
+            persist_db = next(get_db())
+            try:
+                job = persist_db.query(DbReviewJob).filter(DbReviewJob.id == job_id).first()
+                if job:
+                    job.status = "failed"
+                    job.error_message = str(e)
+                    job.completed_at = datetime.utcnow()
+                review = persist_db.query(DbReview).filter(DbReview.id == review_id).first()
+                if review:
+                    review.status = "failed"
+                    review.completed_at = datetime.utcnow()
+                persist_db.commit()
+            finally:
+                persist_db.close()
+            raise
 
     return StreamingResponse(
         generate(),
