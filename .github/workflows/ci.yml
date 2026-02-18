@@ -25,15 +25,15 @@ jobs:
           cache-dependency-path: backend/requirements.txt
 
       - name: Install dependencies
-        run: |
-          pip install -r requirements.txt
-          pip install ruff pytest
+        run: pip install -r requirements-dev.txt
 
       - name: Lint with ruff
         run: ruff check .
 
       - name: Run tests
-        run: pytest --tb=short -q || true
+        run: pytest --tb=short -q
+        env:
+          ANTHROPIC_API_KEY: "test-key-not-real"
 
   frontend:
     name: Frontend
