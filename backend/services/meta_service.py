@@ -70,8 +70,13 @@ class MetaService:
         # Average consensus across all findings
         return round(sum(consensus_scores) / len(consensus_scores), 2)
 
-    async def synthesize(self, comments: list[dict]) -> MetaSynthesisResult:
-        """Take all persona comments and synthesize into meta-review with verdict."""
+    async def synthesize(self, comments: list[dict], persona_weights: dict[str, float] | None = None) -> MetaSynthesisResult:
+        """Take all persona comments and synthesize into meta-review with verdict.
+
+        Args:
+            comments: List of comment dicts with persona_id, persona_name, etc.
+            persona_weights: Optional mapping of persona_id -> weight (float).
+        """
         if not comments:
             return MetaSynthesisResult(comments=[], verdict="ship_it", confidence=0.0)
 
@@ -80,12 +85,34 @@ class MetaService:
         # Count unique personas
         total_personas = len({c["persona_id"] for c in comments})
 
+        # Build persona_id -> name mapping for weight display
+        id_to_name = {c["persona_id"]: c["persona_name"] for c in comments}
+
         # Build the prompt for Claude
         groups_text = ""
         for i, group in enumerate(groups):
             groups_text += f"\n--- GROUP {i} (lines {group['start_line']+1}-{group['end_line']+1}) ---\n"
             for c in group["comments"]:
-                groups_text += f"[{c['persona_name']}]: {c['content']}\n"
+                weight_str = ""
+                if persona_weights and c.get("persona_id") in persona_weights:
+                    w = persona_weights[c["persona_id"]]
+                    if w != 1.0:
+                        weight_str = f" (weight: {w}x)"
+                groups_text += f"[{c['persona_name']}{weight_str}]: {c['content']}\n"
+
+        # Build weight guidance for the prompt
+        weight_guidance = ""
+        if persona_weights:
+            non_default = {pid: w for pid, w in persona_weights.items() if w != 1.0 and pid in id_to_name}
+            if non_default:
+                high_weight = [f"{id_to_name[pid]} ({w}x)" for pid, w in non_default.items() if w > 1.0]
+                low_weight = [f"{id_to_name[pid]} ({w}x)" for pid, w in non_default.items() if w < 1.0]
+                parts = []
+                if high_weight:
+                    parts.append(f"Higher-weight reviewers (give their feedback MORE influence): {', '.join(high_weight)}")
+                if low_weight:
+                    parts.append(f"Lower-weight reviewers (give their feedback LESS influence): {', '.join(low_weight)}")
+                weight_guidance = "\n\nReviewer weights:\n" + "\n".join(parts) + "\n"
 
         prompt = f"""You are a meta-reviewer producing an actionable checklist from feedback by multiple AI personas.
 
@@ -112,7 +139,7 @@ JSON array. Each element:
 - "line_ranges": array of [start, end] pairs this finding covers (for highlighting)
 
 Return ONLY the JSON array.
-
+{weight_guidance}
 {groups_text}"""
 
         client = AsyncAnthropic(api_key=self.settings.anthropic_api_key)

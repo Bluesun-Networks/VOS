@@ -323,8 +323,15 @@ async def synthesize_meta_review(doc_id: str, review_id: str, db: Session = Depe
         for c in review.comments
     ]
 
+    # Build persona weight map from review service
+    persona_weights = {}
+    for pid in review.persona_ids:
+        persona = review_service.get_persona(pid)
+        if persona:
+            persona_weights[pid] = persona.weight
+
     # Run synthesis
-    result = await meta_service.synthesize(comments_data)
+    result = await meta_service.synthesize(comments_data, persona_weights=persona_weights)
 
     # Cache verdict and confidence on the review
     review.meta_verdict = result.verdict

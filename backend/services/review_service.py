@@ -29,7 +29,8 @@ Tone: Sharp, provocative, but intellectually honest. You're not being mean — y
 Keep each comment to 2-3 sentences. Be specific about what you're challenging and why.""",
         tone=PersonaTone.DEVIL_ADVOCATE,
         focus_areas=["logic", "assumptions", "evidence", "counterarguments"],
-        color="#ef4444"
+        color="#ef4444",
+        weight=1.0,
     ),
     Persona(
         id="supportive-editor",
@@ -50,7 +51,8 @@ Tone: Encouraging and constructive. Like a mentor who sees potential and helps r
 Keep each comment to 2-3 sentences. Be genuine — don't manufacture praise.""",
         tone=PersonaTone.SUPPORTIVE,
         focus_areas=["strengths", "potential", "encouragement", "craft"],
-        color="#22c55e"
+        color="#22c55e",
+        weight=0.8,
     ),
     Persona(
         id="technical-architect",
@@ -71,7 +73,8 @@ Tone: Precise and technical. You speak in specifics, not generalities. Reference
 Keep each comment to 2-3 sentences. Be actionable — say what should change and why.""",
         tone=PersonaTone.TECHNICAL,
         focus_areas=["architecture", "scalability", "performance", "design patterns"],
-        color="#3b82f6"
+        color="#3b82f6",
+        weight=1.5,
     ),
     Persona(
         id="casual-reader",
@@ -92,7 +95,8 @@ Tone: Honest and unashamed. Your confusion is the most valuable feedback. Don't 
 Keep each comment to 2-3 sentences. Be specific about exactly where you got lost.""",
         tone=PersonaTone.NEUTRAL,
         focus_areas=["accessibility", "engagement", "confusion", "jargon"],
-        color="#eab308"
+        color="#eab308",
+        weight=0.8,
     ),
     Persona(
         id="security-reviewer",
@@ -113,7 +117,8 @@ Tone: Urgent but professional. Security issues are not theoretical — they're b
 Keep each comment to 2-3 sentences. Classify severity: CRITICAL / HIGH / MEDIUM / LOW.""",
         tone=PersonaTone.CRITICAL,
         focus_areas=["security", "privacy", "authentication", "vulnerabilities", "compliance"],
-        color="#f97316"
+        color="#f97316",
+        weight=1.5,
     ),
     Persona(
         id="accessibility-advocate",
@@ -134,7 +139,8 @@ Tone: Passionate but practical. Accessibility isn't nice-to-have — it's a requ
 Keep each comment to 2-3 sentences. Reference WCAG guidelines when applicable.""",
         tone=PersonaTone.SUPPORTIVE,
         focus_areas=["accessibility", "inclusivity", "WCAG", "usability"],
-        color="#8b5cf6"
+        color="#8b5cf6",
+        weight=1.0,
     ),
     Persona(
         id="executive-summary",
@@ -155,7 +161,8 @@ Tone: Direct and strategic. No fluff. Think in terms of impact, risk, and priori
 Keep each comment to 2-3 sentences. Focus on what matters for decision-making.""",
         tone=PersonaTone.NEUTRAL,
         focus_areas=["strategy", "ROI", "risk", "decisions", "metrics"],
-        color="#06b6d4"
+        color="#06b6d4",
+        weight=1.0,
     ),
 ]
 

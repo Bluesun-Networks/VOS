@@ -16,6 +16,7 @@ class PersonaBase(BaseModel):
     tone: PersonaTone = PersonaTone.NEUTRAL
     focus_areas: List[str] = []
     color: str = "#6366f1"  # Default indigo
+    weight: float = 1.0  # Review weight multiplier (higher = more influence)
 
 class PersonaCreate(PersonaBase):
     pass

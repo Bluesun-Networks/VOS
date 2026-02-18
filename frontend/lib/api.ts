@@ -18,6 +18,7 @@ export interface Persona {
   tone: string;
   focus_areas: string[];
   color: string;
+  weight: number;
 }
 
 export interface Comment {
@@ -87,6 +88,16 @@ export async function fetchDocument(id: string): Promise<Document> {
 export async function fetchPersonas(): Promise<Persona[]> {
   const res = await fetch(`${API_BASE_URL}/api/v1/personas/`);
   if (!res.ok) throw new Error('Failed to fetch personas');
+  return res.json();
+}
+
+export async function updatePersona(personaId: string, data: { weight?: number }): Promise<Persona> {
+  const res = await fetch(`${API_BASE_URL}/api/v1/personas/${personaId}`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(data),
+  });
+  if (!res.ok) throw new Error('Failed to update persona');
   return res.json();
 }
 

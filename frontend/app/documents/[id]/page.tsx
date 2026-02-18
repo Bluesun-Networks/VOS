@@ -6,7 +6,7 @@ import Link from 'next/link';
 import ReactMarkdown from 'react-markdown';
 import {
   fetchDocument, fetchPersonas, fetchLatestComments, startReviewStream,
-  fetchReviews, fetchMetaComments, synthesizeMetaReview,
+  fetchReviews, fetchMetaComments, synthesizeMetaReview, updatePersona,
   type Document, type Persona, type Comment, type PersonaStatus,
   type MetaComment, type MetaReview,
 } from '@/lib/api';
@@ -284,6 +284,12 @@ export default function DocumentDetailPage() {
                   <div className="w-1.5 h-1.5 rounded-full bg-neutral-500" />
                 )}
                 <span>{ps.persona_name}</span>
+                {(() => {
+                  const persona = personas.find(p => p.id === ps.persona_id);
+                  return persona && persona.weight !== 1.0 ? (
+                    <span className="opacity-60">{persona.weight}x</span>
+                  ) : null;
+                })()}
               </div>
             ))}
             {isSynthesizing && (
@@ -365,13 +371,12 @@ export default function DocumentDetailPage() {
               {personas.map((p) => {
                 const isSelected = selectedPersonaIds.includes(p.id);
                 return (
-                  <button
+                  <div
                     key={p.id}
-                    onClick={() => togglePersona(p.id)}
                     className={`w-full text-left p-3 rounded-lg transition-all ${isSelected ? 'bg-[#1a1a25]' : 'hover:bg-[#14141e]'}`}
                     style={{ borderLeft: `3px solid ${isSelected ? p.color : '#2a2a3a'}` }}
                   >
-                    <div className="flex items-center gap-2">
+                    <div className="flex items-center gap-2 cursor-pointer" onClick={() => togglePersona(p.id)}>
                       <div
                         className="w-3.5 h-3.5 rounded border-2 flex items-center justify-center"
                         style={{ borderColor: p.color, backgroundColor: isSelected ? p.color : 'transparent' }}
@@ -379,14 +384,42 @@ export default function DocumentDetailPage() {
                         {isSelected && <svg className="w-2.5 h-2.5 text-white" fill="currentColor" viewBox="0 0 20 20"><path d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z"/></svg>}
                       </div>
                       <span className="text-sm font-medium">{p.name}</span>
+                      <span className="text-[10px] text-neutral-500 ml-auto">{p.weight}x</span>
                     </div>
                     {p.description && <p className="text-[11px] text-neutral-500 mt-1 ml-6">{p.description}</p>}
-                    <div className="flex flex-wrap gap-1 mt-1.5 ml-6">
-                      {p.focus_areas.slice(0, 3).map((area) => (
-                        <span key={area} className="text-[10px] px-1.5 py-0.5 rounded" style={{ backgroundColor: `${p.color}15`, color: p.color }}>{area}</span>
-                      ))}
+                    <div className="flex items-center gap-2 mt-1.5 ml-6">
+                      <div className="flex flex-wrap gap-1 flex-1">
+                        {p.focus_areas.slice(0, 3).map((area) => (
+                          <span key={area} className="text-[10px] px-1.5 py-0.5 rounded" style={{ backgroundColor: `${p.color}15`, color: p.color }}>{area}</span>
+                        ))}
+                      </div>
+                      <div className="flex items-center gap-0.5">
+                        <button
+                          className="w-5 h-5 rounded text-[10px] bg-[#12121a] text-neutral-400 hover:text-white hover:bg-[#2a2a3a] transition-colors flex items-center justify-center"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            const newWeight = Math.max(0.1, Math.round((p.weight - 0.1) * 10) / 10);
+                            updatePersona(p.id, { weight: newWeight }).then((updated) => {
+                              setPersonas(prev => prev.map(pp => pp.id === p.id ? { ...pp, weight: updated.weight } : pp));
+                            });
+                          }}
+                          title="Decrease weight"
+                        >-</button>
+                        <span className="text-[10px] text-neutral-400 w-6 text-center">{p.weight}</span>
+                        <button
+                          className="w-5 h-5 rounded text-[10px] bg-[#12121a] text-neutral-400 hover:text-white hover:bg-[#2a2a3a] transition-colors flex items-center justify-center"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            const newWeight = Math.min(5.0, Math.round((p.weight + 0.1) * 10) / 10);
+                            updatePersona(p.id, { weight: newWeight }).then((updated) => {
+                              setPersonas(prev => prev.map(pp => pp.id === p.id ? { ...pp, weight: updated.weight } : pp));
+                            });
+                          }}
+                          title="Increase weight"
+                        >+</button>
+                      </div>
                     </div>
-                  </button>
+                  </div>
                 );
               })}
             </div>
