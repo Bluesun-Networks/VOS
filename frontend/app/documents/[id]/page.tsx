@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useState, useRef, useCallback } from 'react';
-import { useParams, useSearchParams } from 'next/navigation';
+import { useParams, useSearchParams, useRouter } from 'next/navigation';
 import Link from 'next/link';
 import ReactMarkdown from 'react-markdown';
 import {
@@ -31,6 +31,7 @@ const CATEGORY_LABELS: Record<string, string> = {
 export default function DocumentDetailPage() {
   const params = useParams();
   const searchParams = useSearchParams();
+  const router = useRouter();
   const docId = params.id as string;
   const autoReview = searchParams.get('autoReview') === 'true';
 
@@ -91,8 +92,10 @@ export default function DocumentDetailPage() {
     if (autoReview && document && personas.length > 0 && !hasStartedAutoReview.current) {
       hasStartedAutoReview.current = true;
       doReview(personas.map(p => p.id));
+      // Strip autoReview param so refreshes/bookmarks don't re-trigger
+      router.replace(`/documents/${docId}`);
     }
-  }, [autoReview, document, personas]);
+  }, [autoReview, document, personas, router, docId]);
 
   const triggerMetaSynthesis = async (reviewId: string) => {
     setIsSynthesizing(true);

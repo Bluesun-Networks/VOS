@@ -57,25 +57,30 @@ class MetaService:
             for c in group["comments"]:
                 groups_text += f"[{c['persona_name']}]: {c['content']}\n"
 
-        prompt = f"""You are a meta-reviewer synthesizing feedback from multiple AI personas reviewing a document.
+        prompt = f"""You are a meta-reviewer producing an executive summary of feedback from multiple AI personas.
 
-Below are groups of comments organized by their location in the document. Each group contains comments from different personas that target the same or overlapping sections.
+Your output is a triage dashboard — not a second review. Users drill down into individual comments for details. Your job: tell them what matters, what to fix, and whether this document is ready.
 
-Your job:
-1. For each group, synthesize the comments into ONE clear, actionable meta-comment
-2. De-duplicate similar feedback — if multiple reviewers say the same thing, merge into one point
-3. Preserve unique insights from each persona
-4. Assign a category: structure, clarity, technical, security, or accessibility
-5. Assign a priority: critical, high, medium, or low
+Rules:
+- MERGE similar criticisms across ALL groups into single findings. "3 personas flagged unclear terminology in sections 2-4" > repeating each one.
+- ONE sentence per finding. Two max if critical.
+- Total output: aim for 3-7 findings for the entire document. Fewer is better.
+- Be clinical: verdict + location + action. No elaboration, no teaching.
+- Skip anything that's just style preference or nitpicking.
+- Group findings by theme (security, clarity, structure) not by location.
 
-Respond with a JSON array. Each element must have:
-- "group_index": the group number (0-indexed)
-- "content": the synthesized feedback (2-4 sentences, clear and actionable)
-- "category": one of "structure", "clarity", "technical", "security", "accessibility"
-- "priority": one of "critical", "high", "medium", "low"
-- "contributing_personas": array of persona names that contributed to this synthesis
+Categories: security, technical, clarity, structure, accessibility, style
+Priorities: critical, high, medium, low
 
-IMPORTANT: Return ONLY the JSON array, no markdown formatting, no code blocks, no extra text.
+JSON array. Each element:
+- "group_index": -1 (these are document-level findings, not tied to a single group)
+- "content": the finding (1 sentence, clinical)
+- "category": category
+- "priority": priority
+- "contributing_personas": persona names involved
+- "line_ranges": array of [start, end] pairs this finding covers (for highlighting)
+
+Return ONLY the JSON array.
 
 {groups_text}"""
 
@@ -96,45 +101,54 @@ IMPORTANT: Return ONLY the JSON array, no markdown formatting, no code blocks, n
                     response_text = response_text[:-3].strip()
 
             synthesis = json.loads(response_text)
-        except Exception:
+        except Exception as e:
+            import traceback
+            print(f"[META] Synthesis failed: {e}")
+            traceback.print_exc()
             # Fallback: create simple meta-comments per group without synthesis
             return self._fallback_synthesis(groups)
 
+        # Build a flat list of all comments for source matching
+        all_comments = []
+        for group in groups:
+            all_comments.extend(group["comments"])
+
         meta_comments = []
         for item in synthesis:
-            group_idx = item.get("group_index", 0)
-            if group_idx >= len(groups):
-                continue
-            group = groups[group_idx]
-
             contributing_names = set(item.get("contributing_personas", []))
+
+            # Collect sources from all comments matching contributing personas
             sources = []
-            for c in group["comments"]:
-                if not contributing_names or c["persona_name"] in contributing_names:
+            seen_ids = set()
+            for c in all_comments:
+                if c["persona_name"] in contributing_names and c.get("id") not in seen_ids:
                     sources.append(MetaCommentSource(
                         persona_id=c["persona_id"],
                         persona_name=c["persona_name"],
                         persona_color=c["persona_color"],
                         original_content=c["content"],
                     ))
+                    seen_ids.add(c.get("id"))
 
-            # If no sources matched by name, include all from the group
-            if not sources:
-                sources = [
-                    MetaCommentSource(
-                        persona_id=c["persona_id"],
-                        persona_name=c["persona_name"],
-                        persona_color=c["persona_color"],
-                        original_content=c["content"],
-                    )
-                    for c in group["comments"]
-                ]
+            # Determine line range from line_ranges field or fall back to group
+            line_ranges = item.get("line_ranges", [])
+            if line_ranges:
+                start_line = min(r[0] for r in line_ranges) - 1  # Convert to 0-indexed
+                end_line = max(r[1] for r in line_ranges) - 1
+            else:
+                group_idx = item.get("group_index", 0)
+                if 0 <= group_idx < len(groups):
+                    start_line = groups[group_idx]["start_line"]
+                    end_line = groups[group_idx]["end_line"]
+                else:
+                    start_line = 0
+                    end_line = 0
 
             meta_comments.append(MetaComment(
                 id=str(uuid.uuid4())[:8],
                 content=item.get("content", ""),
-                start_line=group["start_line"],
-                end_line=group["end_line"],
+                start_line=start_line,
+                end_line=end_line,
                 sources=sources,
                 category=item.get("category", "clarity"),
                 priority=item.get("priority", "medium"),
