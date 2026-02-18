@@ -54,6 +54,9 @@ export default function DocumentDetailPage() {
   const [hoveredPersonaId, setHoveredPersonaId] = useState<string | null>(null);
   const [currentReviewId, setCurrentReviewId] = useState<string | null>(null);
 
+  // Mobile tab: switch between document and comments on small screens
+  const [mobileTab, setMobileTab] = useState<'document' | 'comments'>('document');
+
   const abortRef = useRef<AbortController | null>(null);
   const commentsPanelRef = useRef<HTMLDivElement>(null);
   const hasStartedAutoReview = useRef(false);
@@ -224,29 +227,31 @@ export default function DocumentDetailPage() {
   return (
     <main className="h-screen bg-[#0a0a0f] text-[#e4e4ec] flex flex-col overflow-hidden">
       {/* Top bar */}
-      <div className="flex-shrink-0 border-b border-[#2a2a3a] bg-[#0c0c12] px-4 py-3">
-        <div className="flex items-center justify-between">
-          <div className="flex items-center gap-4 min-w-0">
-            <Link href="/documents" className="text-neutral-500 hover:text-neutral-300 text-sm transition-colors flex-shrink-0">
+      <div className="flex-shrink-0 border-b border-[#2a2a3a] bg-[#0c0c12] px-3 sm:px-4 py-2.5 sm:py-3">
+        <div className="flex items-center justify-between gap-2">
+          <div className="flex items-center gap-2 sm:gap-4 min-w-0">
+            <Link href="/documents" className="text-neutral-500 hover:text-neutral-300 text-sm transition-colors flex-shrink-0 touch-manipulation p-1">
               <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" /></svg>
             </Link>
-            <h1 className="text-base font-semibold truncate">{document.title}</h1>
-            {document.description && <span className="text-xs text-neutral-500 truncate hidden md:inline">{document.description}</span>}
+            <h1 className="text-sm sm:text-base font-semibold truncate">{document.title}</h1>
+            {document.description && <span className="text-xs text-neutral-500 truncate hidden lg:inline">{document.description}</span>}
           </div>
-          <div className="flex items-center gap-2 flex-shrink-0">
+          <div className="flex items-center gap-1.5 sm:gap-2 flex-shrink-0">
             <button
               onClick={() => setShowPersonaPanel(!showPersonaPanel)}
-              className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-all ${showPersonaPanel ? 'bg-indigo-600 text-white' : 'bg-[#1a1a25] text-neutral-400 hover:text-white hover:bg-[#252530]'}`}
+              className={`px-2 sm:px-3 py-1.5 rounded-lg text-xs font-medium transition-all touch-manipulation ${showPersonaPanel ? 'bg-indigo-600 text-white' : 'bg-[#1a1a25] text-neutral-400 hover:text-white hover:bg-[#252530]'}`}
             >
-              Personas
+              <span className="hidden sm:inline">Personas</span>
+              <svg className="w-4 h-4 sm:hidden" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0z" /></svg>
             </button>
             {!isReviewing && (
               <button
                 onClick={() => doReview(selectedPersonaIds)}
                 disabled={selectedPersonaIds.length === 0}
-                className="px-4 py-1.5 bg-indigo-600 hover:bg-indigo-700 disabled:opacity-40 rounded-lg text-xs font-medium transition-colors"
+                className="px-3 sm:px-4 py-1.5 bg-indigo-600 hover:bg-indigo-700 active:bg-indigo-800 disabled:opacity-40 rounded-lg text-xs font-medium transition-colors touch-manipulation"
               >
-                {comments.length > 0 ? 'Re-run Review' : 'Start Review'}
+                <span className="hidden sm:inline">{comments.length > 0 ? 'Re-run Review' : 'Start Review'}</span>
+                <span className="sm:hidden">{comments.length > 0 ? 'Re-run' : 'Review'}</span>
               </button>
             )}
           </div>
@@ -254,7 +259,7 @@ export default function DocumentDetailPage() {
 
         {/* Review progress bar */}
         {personaStatuses.size > 0 && (
-          <div className="flex gap-2 mt-2.5 flex-wrap">
+          <div className="flex gap-1.5 sm:gap-2 mt-2 sm:mt-2.5 flex-wrap">
             {Array.from(personaStatuses.values()).map((ps) => (
               <div
                 key={ps.persona_id}
@@ -287,10 +292,31 @@ export default function DocumentDetailPage() {
         )}
       </div>
 
+      {/* Mobile tab switcher */}
+      <div className="flex lg:hidden border-b border-[#2a2a3a] bg-[#0c0c12]">
+        <button
+          onClick={() => setMobileTab('document')}
+          className={`flex-1 py-2.5 text-xs font-medium transition-colors touch-manipulation ${mobileTab === 'document' ? 'text-white border-b-2 border-indigo-500' : 'text-neutral-500'}`}
+        >
+          Document
+        </button>
+        <button
+          onClick={() => setMobileTab('comments')}
+          className={`flex-1 py-2.5 text-xs font-medium transition-colors touch-manipulation relative ${mobileTab === 'comments' ? 'text-white border-b-2 border-indigo-500' : 'text-neutral-500'}`}
+        >
+          Comments
+          {(comments.length > 0 || metaComments.length > 0) && (
+            <span className="ml-1 text-[10px] text-indigo-400">
+              ({viewMode === 'meta' ? metaComments.length : comments.length})
+            </span>
+          )}
+        </button>
+      </div>
+
       {/* Main content area */}
-      <div className="flex flex-1 overflow-hidden">
+      <div className="flex flex-col lg:flex-row flex-1 overflow-hidden">
         {/* Document panel */}
-        <div className="flex-1 overflow-auto p-6">
+        <div className={`flex-1 overflow-auto p-4 sm:p-6 ${mobileTab !== 'document' ? 'hidden lg:block' : ''}`}>
           <div className="max-w-3xl mx-auto">
             {/* Rendered markdown with line highlighting */}
             <div className="bg-[#12121a] rounded-xl border border-[#2a2a3a] overflow-hidden">
@@ -343,9 +369,17 @@ export default function DocumentDetailPage() {
 
         {/* Persona selection panel (overlay) */}
         {showPersonaPanel && (
-          <div className="w-72 border-l border-[#2a2a3a] bg-[#0c0c12] flex flex-col overflow-auto flex-shrink-0">
+          <div className="fixed inset-0 z-40 lg:relative lg:inset-auto lg:z-auto w-full lg:w-72 border-l-0 lg:border-l border-[#2a2a3a] bg-[#0c0c12] flex flex-col overflow-auto flex-shrink-0">
             <div className="p-4 border-b border-[#2a2a3a]">
-              <h2 className="text-sm font-semibold">Select Personas</h2>
+              <div className="flex items-center justify-between">
+                <h2 className="text-sm font-semibold">Select Personas</h2>
+                <button
+                  onClick={() => setShowPersonaPanel(false)}
+                  className="lg:hidden p-1 text-neutral-500 hover:text-white transition-colors touch-manipulation"
+                >
+                  <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" /></svg>
+                </button>
+              </div>
               <div className="flex gap-2 mt-2">
                 <button onClick={() => setSelectedPersonaIds(personas.map(p => p.id))} className="text-xs text-indigo-400 hover:text-indigo-300">All</button>
                 <span className="text-[#2a2a3a]">|</span>
@@ -394,7 +428,7 @@ export default function DocumentDetailPage() {
         )}
 
         {/* Comments panel */}
-        <div className="w-[380px] border-l border-[#2a2a3a] bg-[#0c0c12] flex flex-col flex-shrink-0">
+        <div className={`w-full lg:w-[380px] border-l-0 lg:border-l border-[#2a2a3a] bg-[#0c0c12] flex flex-col flex-shrink-0 ${mobileTab !== 'comments' ? 'hidden lg:flex' : 'flex-1'}`}>
           {/* View mode toggle + header */}
           <div className="p-3 border-b border-[#2a2a3a]">
             {/* Toggle: Meta Review | Individual Reviews */}

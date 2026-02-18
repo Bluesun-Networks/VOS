@@ -4,6 +4,7 @@ import './globals.css'
 export const metadata: Metadata = {
   title: 'VOS - Document Review',
   description: 'Voxora · Opinari · Scrutara — AI-powered multi-persona document review',
+  viewport: 'width=device-width, initial-scale=1, maximum-scale=1',
 }
 
 export default function RootLayout({
@@ -13,7 +14,7 @@ export default function RootLayout({
 }) {
   return (
     <html lang="en" className="dark">
-      <body className="bg-[#0a0a0f] text-[#e4e4ec] antialiased">{children}</body>
+      <body className="bg-[#0a0a0f] text-[#e4e4ec] antialiased overflow-x-hidden">{children}</body>
     </html>
   )
 }

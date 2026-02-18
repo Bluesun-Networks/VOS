@@ -37,16 +37,16 @@ export default function DocumentsPage() {
 
   return (
     <main className="min-h-screen bg-[#0a0a0f]">
-      <div className="max-w-4xl mx-auto px-6 py-12">
+      <div className="max-w-4xl mx-auto px-4 sm:px-6 py-8 sm:py-12">
         {/* Header */}
-        <div className="flex items-center justify-between mb-10">
+        <div className="flex items-center justify-between mb-8 sm:mb-10">
           <div>
             <Link href="/" className="text-neutral-500 hover:text-neutral-300 text-xs tracking-wide uppercase mb-3 inline-block transition-colors">
               VOS
             </Link>
-            <h1 className="text-2xl font-bold tracking-tight">Documents</h1>
+            <h1 className="text-xl sm:text-2xl font-bold tracking-tight">Documents</h1>
           </div>
-          <label className="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 rounded-lg text-sm font-medium transition-colors cursor-pointer">
+          <label className="px-3 sm:px-4 py-2 bg-indigo-600 hover:bg-indigo-700 active:bg-indigo-800 rounded-lg text-sm font-medium transition-colors cursor-pointer touch-manipulation">
             + Upload
             <input type="file" accept=".md" onChange={handleFileUpload} className="hidden" />
           </label>
@@ -80,9 +80,9 @@ export default function DocumentsPage() {
               <Link
                 key={doc.id}
                 href={`/documents/${doc.id}`}
-                className="block bg-[#12121a] hover:bg-[#16161f] rounded-xl p-5 border border-[#2a2a3a] hover:border-[#3a3a4a] transition-all group"
+                className="block bg-[#12121a] hover:bg-[#16161f] active:bg-[#1a1a24] rounded-xl p-4 sm:p-5 border border-[#2a2a3a] hover:border-[#3a3a4a] transition-all group touch-manipulation"
               >
-                <div className="flex items-start justify-between">
+                <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-2 sm:gap-0">
                   <div className="flex-1 min-w-0">
                     <h3 className="font-semibold text-[#e4e4ec] group-hover:text-white transition-colors truncate">
                       {doc.title}
@@ -91,10 +91,10 @@ export default function DocumentsPage() {
                       <p className="text-neutral-500 text-sm mt-1 truncate">{doc.description}</p>
                     )}
                   </div>
-                  <div className="text-right ml-4 flex-shrink-0">
+                  <div className="sm:text-right sm:ml-4 flex-shrink-0 flex sm:block items-center gap-3">
                     <div className="text-xs text-neutral-500">{formatDate(doc.created_at)}</div>
                     {doc.review_count > 0 && (
-                      <div className="text-xs text-indigo-400 mt-1">
+                      <div className="text-xs text-indigo-400 sm:mt-1">
                         {doc.review_count} review{doc.review_count !== 1 ? 's' : ''}
                       </div>
                     )}
