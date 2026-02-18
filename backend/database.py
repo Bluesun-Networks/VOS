@@ -1,4 +1,4 @@
-from sqlalchemy import create_engine, Column, String, Text, DateTime, Integer, ForeignKey, JSON
+from sqlalchemy import create_engine, Column, String, Text, DateTime, Integer, Boolean, ForeignKey, JSON
 from sqlalchemy.orm import declarative_base, sessionmaker, relationship
 from datetime import datetime
 
@@ -7,6 +7,27 @@ DATABASE_URL = "sqlite:///./vos.db"
 engine = create_engine(DATABASE_URL, connect_args={"check_same_thread": False})
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 Base = declarative_base()
+
+
+class DbPersona(Base):
+    __tablename__ = "personas"
+
+    id = Column(String, primary_key=True)
+    name = Column(String, nullable=False)
+    description = Column(Text, nullable=True)
+    system_prompt = Column(Text, nullable=False)
+    tone = Column(String, default="neutral")
+    focus_areas = Column(JSON, default=list)
+    color = Column(String, default="#6366f1")
+    output_requirements = Column(Text, nullable=True)
+    reference_notes = Column(Text, nullable=True)
+    examples = Column(Text, nullable=True)
+    is_default = Column(Boolean, default=False)
+    is_active = Column(Boolean, default=True)
+    sort_order = Column(Integer, default=0)
+    color_theme = Column(String, nullable=True)
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
 
 class DbDocument(Base):

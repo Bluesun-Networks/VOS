@@ -135,8 +135,10 @@ async def start_review(doc_id: str, request: ReviewRequest, db: Session = Depend
     if not db_doc:
         raise HTTPException(status_code=404, detail="Document not found")
 
-    persona_ids = request.persona_ids or [p.id for p in review_service.list_personas()]
-    valid_ids = [pid for pid in persona_ids if review_service.get_persona(pid)]
+    if request.persona_ids:
+        valid_ids = [pid for pid in request.persona_ids if review_service.get_persona(pid)]
+    else:
+        valid_ids = [p.id for p in review_service.list_personas()]
 
     review_id = str(uuid.uuid4())[:8]
     db_review = DbReview(
