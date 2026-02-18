@@ -6,12 +6,12 @@ import Link from 'next/link';
 import ReactMarkdown from 'react-markdown';
 import {
   fetchDocument, fetchPersonas, fetchLatestComments, startReviewStream,
-  fetchReviews, fetchMetaComments, synthesizeMetaReview, updatePersona,
+  fetchReviews, fetchMetaComments, synthesizeMetaReview,
   type Document, type Persona, type Comment, type PersonaStatus,
-  type MetaComment, type MetaReview,
+  type MetaComment,
 } from '@/lib/api';
 
-type ViewMode = 'summary' | 'meta' | 'individual';
+type ViewMode = 'meta' | 'individual';
 
 const PRIORITY_COLORS: Record<string, string> = {
   critical: '#ef4444',
@@ -27,13 +27,6 @@ const CATEGORY_LABELS: Record<string, string> = {
   security: 'Security',
   accessibility: 'Accessibility',
 };
-
-interface ConnectorLine {
-  id: string;
-  color: string;
-  x1: number; y1: number;
-  x2: number; y2: number;
-}
 
 export default function DocumentDetailPage() {
   const params = useParams();
@@ -54,23 +47,18 @@ export default function DocumentDetailPage() {
   const [filterPersona, setFilterPersona] = useState<string | null>(null);
 
   // Meta review state
-  const [viewMode, setViewMode] = useState<ViewMode>('summary');
+  const [viewMode, setViewMode] = useState<ViewMode>('meta');
   const [metaComments, setMetaComments] = useState<MetaComment[]>([]);
-  const [metaVerdict, setMetaVerdict] = useState<string | null>(null);
-  const [metaConfidence, setMetaConfidence] = useState<number>(0);
   const [isSynthesizing, setIsSynthesizing] = useState(false);
   const [expandedMetaId, setExpandedMetaId] = useState<string | null>(null);
   const [hoveredPersonaId, setHoveredPersonaId] = useState<string | null>(null);
   const [currentReviewId, setCurrentReviewId] = useState<string | null>(null);
-  const [suggestionsExpanded, setSuggestionsExpanded] = useState(false);
 
-  // Connector lines state
-  const [connectorLines, setConnectorLines] = useState<ConnectorLine[]>([]);
+  // Mobile tab: switch between document and comments on small screens
+  const [mobileTab, setMobileTab] = useState<'document' | 'comments'>('document');
 
   const abortRef = useRef<AbortController | null>(null);
   const commentsPanelRef = useRef<HTMLDivElement>(null);
-  const docPanelRef = useRef<HTMLDivElement>(null);
-  const mainAreaRef = useRef<HTMLDivElement>(null);
   const hasStartedAutoReview = useRef(false);
 
   const contentLines = document?.content?.split('\n') || [];
@@ -90,10 +78,8 @@ export default function DocumentDetailPage() {
             setCurrentReviewId(completedReview.id);
             try {
               const cached = await fetchMetaComments(docId, completedReview.id);
-              if (cached.comments.length > 0) {
-                setMetaComments(cached.comments);
-                setMetaVerdict(cached.verdict);
-                setMetaConfidence(cached.confidence);
+              if (cached.length > 0) {
+                setMetaComments(cached);
               }
             } catch {
               // No cached meta comments
@@ -118,10 +104,8 @@ export default function DocumentDetailPage() {
     setIsSynthesizing(true);
     try {
       const result = await synthesizeMetaReview(docId, reviewId);
-      setMetaComments(result.comments);
-      setMetaVerdict(result.verdict);
-      setMetaConfidence(result.confidence);
-      setViewMode('summary');
+      setMetaComments(result);
+      setViewMode('meta');
     } catch {
       // Synthesis failed, stay on individual view
     } finally {
@@ -134,8 +118,6 @@ export default function DocumentDetailPage() {
     setIsReviewing(true);
     setComments([]);
     setMetaComments([]);
-    setMetaVerdict(null);
-    setMetaConfidence(0);
     setPersonaStatuses(new Map());
     setShowPersonaPanel(false);
     setCurrentReviewId(null);
@@ -186,7 +168,7 @@ export default function DocumentDetailPage() {
   const lineHighlights = useCallback(() => {
     const highlights: Map<number, { commentId: string; color: string }[]> = new Map();
 
-    if ((viewMode === 'meta' || viewMode === 'summary') && metaComments.length > 0) {
+    if (viewMode === 'meta' && metaComments.length > 0) {
       metaComments.forEach((mc) => {
         const color = PRIORITY_COLORS[mc.priority] || PRIORITY_COLORS.medium;
         for (let line = mc.start_line; line <= mc.end_line; line++) {
@@ -217,96 +199,6 @@ export default function DocumentDetailPage() {
   // Unique personas in comments for filter
   const commentPersonas = Array.from(new Map(comments.map(c => [c.persona_id, { id: c.persona_id, name: c.persona_name, color: c.persona_color }])).values());
 
-  // Compute connector lines for active comment
-  const updateConnectors = useCallback(() => {
-    if (!activeCommentId || !mainAreaRef.current) {
-      setConnectorLines([]);
-      return;
-    }
-
-    const mainRect = mainAreaRef.current.getBoundingClientRect();
-    const lines: ConnectorLine[] = [];
-
-    // Find the comment element
-    const commentEl = window.document.getElementById(`comment-${activeCommentId}`);
-    if (!commentEl) {
-      setConnectorLines([]);
-      return;
-    }
-    const commentRect = commentEl.getBoundingClientRect();
-    const commentY = commentRect.top + commentRect.height / 2 - mainRect.top;
-
-    // Determine which item is active to get start_line and color
-    let startLine: number | null = null;
-    let endLine: number | null = null;
-    let color = '#6b7280';
-
-    if (viewMode === 'meta') {
-      const mc = metaComments.find(m => m.id === activeCommentId);
-      if (mc) {
-        startLine = mc.start_line;
-        endLine = mc.end_line;
-        color = PRIORITY_COLORS[mc.priority] || PRIORITY_COLORS.medium;
-      }
-    } else {
-      const c = comments.find(c => c.id === activeCommentId);
-      if (c) {
-        startLine = c.start_line;
-        endLine = c.end_line;
-        color = c.persona_color;
-      }
-    }
-
-    if (startLine === null || endLine === null) {
-      setConnectorLines([]);
-      return;
-    }
-
-    // Find the midpoint line element
-    const midLine = Math.floor((startLine + endLine) / 2);
-    const lineEl = window.document.querySelector(`[data-line="${midLine}"]`) as HTMLElement | null;
-    if (!lineEl) {
-      setConnectorLines([]);
-      return;
-    }
-
-    const lineRect = lineEl.getBoundingClientRect();
-    const lineY = lineRect.top + lineRect.height / 2 - mainRect.top;
-    const lineX = lineRect.right - mainRect.left;
-    const commentX = commentRect.left - mainRect.left;
-
-    lines.push({
-      id: activeCommentId,
-      color,
-      x1: lineX,
-      y1: lineY,
-      x2: commentX,
-      y2: commentY,
-    });
-
-    setConnectorLines(lines);
-  }, [activeCommentId, viewMode, metaComments, comments]);
-
-  // Update connectors on scroll, resize, and when active comment changes
-  useEffect(() => {
-    updateConnectors();
-
-    const docPanel = docPanelRef.current;
-    const commentsPanel = commentsPanelRef.current;
-
-    const handler = () => updateConnectors();
-
-    docPanel?.addEventListener('scroll', handler);
-    commentsPanel?.addEventListener('scroll', handler);
-    window.addEventListener('resize', handler);
-
-    return () => {
-      docPanel?.removeEventListener('scroll', handler);
-      commentsPanel?.removeEventListener('scroll', handler);
-      window.removeEventListener('resize', handler);
-    };
-  }, [updateConnectors]);
-
   if (error) {
     return (
       <main className="min-h-screen bg-[#0a0a0f] text-[#e4e4ec] p-6">
@@ -335,29 +227,31 @@ export default function DocumentDetailPage() {
   return (
     <main className="h-screen bg-[#0a0a0f] text-[#e4e4ec] flex flex-col overflow-hidden">
       {/* Top bar */}
-      <div className="flex-shrink-0 border-b border-[#2a2a3a] bg-[#0c0c12] px-4 py-3">
-        <div className="flex items-center justify-between">
-          <div className="flex items-center gap-4 min-w-0">
-            <Link href="/documents" className="text-neutral-500 hover:text-neutral-300 text-sm transition-colors flex-shrink-0">
+      <div className="flex-shrink-0 border-b border-[#2a2a3a] bg-[#0c0c12] px-3 sm:px-4 py-2.5 sm:py-3">
+        <div className="flex items-center justify-between gap-2">
+          <div className="flex items-center gap-2 sm:gap-4 min-w-0">
+            <Link href="/documents" className="text-neutral-500 hover:text-neutral-300 text-sm transition-colors flex-shrink-0 touch-manipulation p-1">
               <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" /></svg>
             </Link>
-            <h1 className="text-base font-semibold truncate">{document.title}</h1>
-            {document.description && <span className="text-xs text-neutral-500 truncate hidden md:inline">{document.description}</span>}
+            <h1 className="text-sm sm:text-base font-semibold truncate">{document.title}</h1>
+            {document.description && <span className="text-xs text-neutral-500 truncate hidden lg:inline">{document.description}</span>}
           </div>
-          <div className="flex items-center gap-2 flex-shrink-0">
+          <div className="flex items-center gap-1.5 sm:gap-2 flex-shrink-0">
             <button
               onClick={() => setShowPersonaPanel(!showPersonaPanel)}
-              className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-all ${showPersonaPanel ? 'bg-indigo-600 text-white' : 'bg-[#1a1a25] text-neutral-400 hover:text-white hover:bg-[#252530]'}`}
+              className={`px-2 sm:px-3 py-1.5 rounded-lg text-xs font-medium transition-all touch-manipulation ${showPersonaPanel ? 'bg-indigo-600 text-white' : 'bg-[#1a1a25] text-neutral-400 hover:text-white hover:bg-[#252530]'}`}
             >
-              Personas
+              <span className="hidden sm:inline">Personas</span>
+              <svg className="w-4 h-4 sm:hidden" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0z" /></svg>
             </button>
             {!isReviewing && (
               <button
                 onClick={() => doReview(selectedPersonaIds)}
                 disabled={selectedPersonaIds.length === 0}
-                className="px-4 py-1.5 bg-indigo-600 hover:bg-indigo-700 disabled:opacity-40 rounded-lg text-xs font-medium transition-colors"
+                className="px-3 sm:px-4 py-1.5 bg-indigo-600 hover:bg-indigo-700 active:bg-indigo-800 disabled:opacity-40 rounded-lg text-xs font-medium transition-colors touch-manipulation"
               >
-                {comments.length > 0 ? 'Re-run Review' : 'Start Review'}
+                <span className="hidden sm:inline">{comments.length > 0 ? 'Re-run Review' : 'Start Review'}</span>
+                <span className="sm:hidden">{comments.length > 0 ? 'Re-run' : 'Review'}</span>
               </button>
             )}
           </div>
@@ -365,7 +259,7 @@ export default function DocumentDetailPage() {
 
         {/* Review progress bar */}
         {personaStatuses.size > 0 && (
-          <div className="flex gap-2 mt-2.5 flex-wrap">
+          <div className="flex gap-1.5 sm:gap-2 mt-2 sm:mt-2.5 flex-wrap">
             {Array.from(personaStatuses.values()).map((ps) => (
               <div
                 key={ps.persona_id}
@@ -386,12 +280,6 @@ export default function DocumentDetailPage() {
                   <div className="w-1.5 h-1.5 rounded-full bg-neutral-500" />
                 )}
                 <span>{ps.persona_name}</span>
-                {(() => {
-                  const persona = personas.find(p => p.id === ps.persona_id);
-                  return persona && persona.weight !== 1.0 ? (
-                    <span className="opacity-60">{persona.weight}x</span>
-                  ) : null;
-                })()}
               </div>
             ))}
             {isSynthesizing && (
@@ -404,53 +292,31 @@ export default function DocumentDetailPage() {
         )}
       </div>
 
-      {/* Main content area */}
-      <div ref={mainAreaRef} className="flex flex-1 overflow-hidden relative">
-        {/* SVG connector lines overlay */}
-        {connectorLines.length > 0 && (
-          <svg
-            className="absolute inset-0 w-full h-full pointer-events-none"
-            style={{ zIndex: 10 }}
-          >
-            <defs>
-              {connectorLines.map((line) => (
-                <linearGradient
-                  key={`grad-${line.id}`}
-                  id={`connector-grad-${line.id}`}
-                  x1="0%" y1="0%" x2="100%" y2="0%"
-                >
-                  <stop offset="0%" stopColor={line.color} stopOpacity="0.6" />
-                  <stop offset="50%" stopColor={line.color} stopOpacity="0.3" />
-                  <stop offset="100%" stopColor={line.color} stopOpacity="0.6" />
-                </linearGradient>
-              ))}
-            </defs>
-            {connectorLines.map((line) => {
-              const dx = line.x2 - line.x1;
-              const cp = dx * 0.4;
-              const path = `M ${line.x1} ${line.y1} C ${line.x1 + cp} ${line.y1}, ${line.x2 - cp} ${line.y2}, ${line.x2} ${line.y2}`;
-              return (
-                <g key={line.id}>
-                  <path
-                    d={path}
-                    fill="none"
-                    stroke={`url(#connector-grad-${line.id})`}
-                    strokeWidth="2"
-                    strokeDasharray="6 4"
-                    className="animate-connector-dash"
-                  />
-                  {/* Start dot */}
-                  <circle cx={line.x1} cy={line.y1} r="3" fill={line.color} fillOpacity="0.7" />
-                  {/* End dot */}
-                  <circle cx={line.x2} cy={line.y2} r="3" fill={line.color} fillOpacity="0.7" />
-                </g>
-              );
-            })}
-          </svg>
-        )}
+      {/* Mobile tab switcher */}
+      <div className="flex lg:hidden border-b border-[#2a2a3a] bg-[#0c0c12]">
+        <button
+          onClick={() => setMobileTab('document')}
+          className={`flex-1 py-2.5 text-xs font-medium transition-colors touch-manipulation ${mobileTab === 'document' ? 'text-white border-b-2 border-indigo-500' : 'text-neutral-500'}`}
+        >
+          Document
+        </button>
+        <button
+          onClick={() => setMobileTab('comments')}
+          className={`flex-1 py-2.5 text-xs font-medium transition-colors touch-manipulation relative ${mobileTab === 'comments' ? 'text-white border-b-2 border-indigo-500' : 'text-neutral-500'}`}
+        >
+          Comments
+          {(comments.length > 0 || metaComments.length > 0) && (
+            <span className="ml-1 text-[10px] text-indigo-400">
+              ({viewMode === 'meta' ? metaComments.length : comments.length})
+            </span>
+          )}
+        </button>
+      </div>
 
+      {/* Main content area */}
+      <div className="flex flex-col lg:flex-row flex-1 overflow-hidden">
         {/* Document panel */}
-        <div ref={docPanelRef} className="flex-1 overflow-auto p-6">
+        <div className={`flex-1 overflow-auto p-4 sm:p-6 ${mobileTab !== 'document' ? 'hidden lg:block' : ''}`}>
           <div className="max-w-3xl mx-auto">
             {/* Rendered markdown with line highlighting */}
             <div className="bg-[#12121a] rounded-xl border border-[#2a2a3a] overflow-hidden">
@@ -465,7 +331,6 @@ export default function DocumentDetailPage() {
                   return (
                     <div
                       key={idx}
-                      data-line={idx}
                       className={`flex group rounded-sm transition-colors duration-200 ${hasHighlight ? 'cursor-pointer' : ''} ${isActive ? 'ring-1 ring-inset' : ''}`}
                       style={{
                         backgroundColor: hasHighlight ? `${primaryColor}${isActive ? '25' : '10'}` : undefined,
@@ -504,9 +369,17 @@ export default function DocumentDetailPage() {
 
         {/* Persona selection panel (overlay) */}
         {showPersonaPanel && (
-          <div className="w-72 border-l border-[#2a2a3a] bg-[#0c0c12] flex flex-col overflow-auto flex-shrink-0">
+          <div className="fixed inset-0 z-40 lg:relative lg:inset-auto lg:z-auto w-full lg:w-72 border-l-0 lg:border-l border-[#2a2a3a] bg-[#0c0c12] flex flex-col overflow-auto flex-shrink-0">
             <div className="p-4 border-b border-[#2a2a3a]">
-              <h2 className="text-sm font-semibold">Select Personas</h2>
+              <div className="flex items-center justify-between">
+                <h2 className="text-sm font-semibold">Select Personas</h2>
+                <button
+                  onClick={() => setShowPersonaPanel(false)}
+                  className="lg:hidden p-1 text-neutral-500 hover:text-white transition-colors touch-manipulation"
+                >
+                  <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" /></svg>
+                </button>
+              </div>
               <div className="flex gap-2 mt-2">
                 <button onClick={() => setSelectedPersonaIds(personas.map(p => p.id))} className="text-xs text-indigo-400 hover:text-indigo-300">All</button>
                 <span className="text-[#2a2a3a]">|</span>
@@ -517,12 +390,13 @@ export default function DocumentDetailPage() {
               {personas.map((p) => {
                 const isSelected = selectedPersonaIds.includes(p.id);
                 return (
-                  <div
+                  <button
                     key={p.id}
+                    onClick={() => togglePersona(p.id)}
                     className={`w-full text-left p-3 rounded-lg transition-all ${isSelected ? 'bg-[#1a1a25]' : 'hover:bg-[#14141e]'}`}
                     style={{ borderLeft: `3px solid ${isSelected ? p.color : '#2a2a3a'}` }}
                   >
-                    <div className="flex items-center gap-2 cursor-pointer" onClick={() => togglePersona(p.id)}>
+                    <div className="flex items-center gap-2">
                       <div
                         className="w-3.5 h-3.5 rounded border-2 flex items-center justify-center"
                         style={{ borderColor: p.color, backgroundColor: isSelected ? p.color : 'transparent' }}
@@ -530,42 +404,14 @@ export default function DocumentDetailPage() {
                         {isSelected && <svg className="w-2.5 h-2.5 text-white" fill="currentColor" viewBox="0 0 20 20"><path d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z"/></svg>}
                       </div>
                       <span className="text-sm font-medium">{p.name}</span>
-                      <span className="text-[10px] text-neutral-500 ml-auto">{p.weight}x</span>
                     </div>
                     {p.description && <p className="text-[11px] text-neutral-500 mt-1 ml-6">{p.description}</p>}
-                    <div className="flex items-center gap-2 mt-1.5 ml-6">
-                      <div className="flex flex-wrap gap-1 flex-1">
-                        {p.focus_areas.slice(0, 3).map((area) => (
-                          <span key={area} className="text-[10px] px-1.5 py-0.5 rounded" style={{ backgroundColor: `${p.color}15`, color: p.color }}>{area}</span>
-                        ))}
-                      </div>
-                      <div className="flex items-center gap-0.5">
-                        <button
-                          className="w-5 h-5 rounded text-[10px] bg-[#12121a] text-neutral-400 hover:text-white hover:bg-[#2a2a3a] transition-colors flex items-center justify-center"
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            const newWeight = Math.max(0.1, Math.round((p.weight - 0.1) * 10) / 10);
-                            updatePersona(p.id, { weight: newWeight }).then((updated) => {
-                              setPersonas(prev => prev.map(pp => pp.id === p.id ? { ...pp, weight: updated.weight } : pp));
-                            });
-                          }}
-                          title="Decrease weight"
-                        >-</button>
-                        <span className="text-[10px] text-neutral-400 w-6 text-center">{p.weight}</span>
-                        <button
-                          className="w-5 h-5 rounded text-[10px] bg-[#12121a] text-neutral-400 hover:text-white hover:bg-[#2a2a3a] transition-colors flex items-center justify-center"
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            const newWeight = Math.min(5.0, Math.round((p.weight + 0.1) * 10) / 10);
-                            updatePersona(p.id, { weight: newWeight }).then((updated) => {
-                              setPersonas(prev => prev.map(pp => pp.id === p.id ? { ...pp, weight: updated.weight } : pp));
-                            });
-                          }}
-                          title="Increase weight"
-                        >+</button>
-                      </div>
+                    <div className="flex flex-wrap gap-1 mt-1.5 ml-6">
+                      {p.focus_areas.slice(0, 3).map((area) => (
+                        <span key={area} className="text-[10px] px-1.5 py-0.5 rounded" style={{ backgroundColor: `${p.color}15`, color: p.color }}>{area}</span>
+                      ))}
                     </div>
-                  </div>
+                  </button>
                 );
               })}
             </div>
@@ -582,22 +428,12 @@ export default function DocumentDetailPage() {
         )}
 
         {/* Comments panel */}
-        <div className="w-[380px] border-l border-[#2a2a3a] bg-[#0c0c12] flex flex-col flex-shrink-0">
+        <div className={`w-full lg:w-[380px] border-l-0 lg:border-l border-[#2a2a3a] bg-[#0c0c12] flex flex-col flex-shrink-0 ${mobileTab !== 'comments' ? 'hidden lg:flex' : 'flex-1'}`}>
           {/* View mode toggle + header */}
           <div className="p-3 border-b border-[#2a2a3a]">
-            {/* Toggle: Summary | Meta Review | Individual Reviews */}
+            {/* Toggle: Meta Review | Individual Reviews */}
             {(metaComments.length > 0 || comments.length > 0) && (
               <div className="flex rounded-lg bg-[#12121a] p-0.5 mb-2.5">
-                <button
-                  onClick={() => setViewMode('summary')}
-                  className={`flex-1 text-xs font-medium py-1.5 rounded-md transition-all ${
-                    viewMode === 'summary'
-                      ? 'bg-indigo-600 text-white shadow-sm'
-                      : 'text-neutral-500 hover:text-neutral-300'
-                  }`}
-                >
-                  Summary
-                </button>
                 <button
                   onClick={() => setViewMode('meta')}
                   className={`flex-1 text-xs font-medium py-1.5 rounded-md transition-all ${
@@ -606,7 +442,7 @@ export default function DocumentDetailPage() {
                       : 'text-neutral-500 hover:text-neutral-300'
                   }`}
                 >
-                  Details
+                  Meta Review
                   {metaComments.length > 0 && (
                     <span className={`ml-1 ${viewMode === 'meta' ? 'text-indigo-200' : 'text-neutral-600'}`}>
                       ({metaComments.length})
@@ -634,7 +470,7 @@ export default function DocumentDetailPage() {
             {/* Header */}
             <div className="flex items-center justify-between">
               <h2 className="text-sm font-semibold">
-                {viewMode === 'summary' ? 'Summary' : viewMode === 'meta' ? 'Meta Review' : 'Comments'}
+                {viewMode === 'meta' ? 'Meta Review' : 'Comments'}
                 {viewMode === 'individual' && comments.length > 0 && (
                   <span className="text-neutral-500 font-normal ml-1">({sortedComments.length})</span>
                 )}
@@ -670,252 +506,9 @@ export default function DocumentDetailPage() {
 
           {/* Comments/Meta list */}
           <div ref={commentsPanelRef} className="flex-1 overflow-auto p-3 space-y-2">
-            {/* SUMMARY VIEW */}
-            {viewMode === 'summary' && (
-              <>
-                {metaComments.length === 0 && !isSynthesizing && !isReviewing && (
-                  <div className="text-center text-neutral-500 py-12">
-                    <svg className="w-10 h-10 mx-auto mb-3 opacity-30" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1} d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2" />
-                    </svg>
-                    <p className="text-sm">No summary yet</p>
-                    <p className="text-xs mt-1 text-neutral-600">Run a review to generate synthesized feedback</p>
-                  </div>
-                )}
-
-                {isSynthesizing && (
-                  <div className="flex items-center justify-center py-6 gap-2">
-                    <div className="w-4 h-4 border-2 border-indigo-500 border-t-transparent rounded-full animate-spin" />
-                    <span className="text-xs text-neutral-500">Synthesizing meta review...</span>
-                  </div>
-                )}
-
-                {metaVerdict && metaComments.length > 0 && (
-                  <>
-                    {/* Verdict badge */}
-                    <div className={`rounded-lg p-4 border ${
-                      metaVerdict === 'ship_it' ? 'bg-green-500/10 border-green-500/30' :
-                      metaVerdict === 'fix_first' ? 'bg-yellow-500/10 border-yellow-500/30' :
-                      'bg-red-500/10 border-red-500/30'
-                    }`}>
-                      <div className="flex items-center gap-3 mb-2">
-                        <div className={`w-10 h-10 rounded-full flex items-center justify-center text-xl ${
-                          metaVerdict === 'ship_it' ? 'bg-green-500/20 text-green-400' :
-                          metaVerdict === 'fix_first' ? 'bg-yellow-500/20 text-yellow-400' :
-                          'bg-red-500/20 text-red-400'
-                        }`}>
-                          {metaVerdict === 'ship_it' ? '\u2713' : metaVerdict === 'fix_first' ? '\u26A0' : '\u2717'}
-                        </div>
-                        <div>
-                          <div className={`text-base font-bold ${
-                            metaVerdict === 'ship_it' ? 'text-green-400' :
-                            metaVerdict === 'fix_first' ? 'text-yellow-400' :
-                            'text-red-400'
-                          }`}>
-                            {metaVerdict === 'ship_it' ? 'Ship It' :
-                             metaVerdict === 'fix_first' ? 'Fix First' :
-                             'Major Rework'}
-                          </div>
-                          <div className="text-[11px] text-neutral-500">
-                            {metaComments.length} finding{metaComments.length !== 1 ? 's' : ''} from {
-                              new Set(metaComments.flatMap(mc => mc.sources.map(s => s.persona_id))).size
-                            } reviewers
-                          </div>
-                        </div>
-                      </div>
-
-                      {/* Confidence indicator */}
-                      <div className="mt-2">
-                        <div className="flex items-center justify-between mb-1">
-                          <span className="text-[10px] text-neutral-500 uppercase tracking-wider">Consensus</span>
-                          <span className="text-[11px] text-neutral-400">
-                            {(() => {
-                              const uniqueContributing = new Set(metaComments.flatMap(mc => mc.sources.map(s => s.persona_id)));
-                              const totalUsed = commentPersonas.length;
-                              return `${uniqueContributing.size}/${totalUsed} reviewers agree`;
-                            })()}
-                          </span>
-                        </div>
-                        <div className="w-full h-1.5 bg-[#1a1a25] rounded-full overflow-hidden">
-                          <div
-                            className={`h-full rounded-full transition-all ${
-                              metaVerdict === 'ship_it' ? 'bg-green-500' :
-                              metaVerdict === 'fix_first' ? 'bg-yellow-500' :
-                              'bg-red-500'
-                            }`}
-                            style={{ width: `${Math.round(metaConfidence * 100)}%` }}
-                          />
-                        </div>
-                      </div>
-                    </div>
-
-                    {/* Dealbreakers section: critical + high */}
-                    {(() => {
-                      const dealbreakers = sortedMetaComments.filter(mc => mc.priority === 'critical' || mc.priority === 'high');
-                      if (dealbreakers.length === 0) return null;
-                      return (
-                        <div className="mt-1">
-                          <h3 className="text-xs font-semibold text-red-400 uppercase tracking-wider mb-2 px-1">
-                            Dealbreakers ({dealbreakers.length})
-                          </h3>
-                          <div className="space-y-1.5">
-                            {dealbreakers.map((mc) => {
-                              const priorityColor = PRIORITY_COLORS[mc.priority];
-                              return (
-                                <div
-                                  key={mc.id}
-                                  className="rounded-lg p-2.5 bg-[#12121a] border-l-[3px] cursor-pointer hover:bg-[#16161f] transition-colors"
-                                  style={{ borderLeftColor: priorityColor }}
-                                  onClick={() => {
-                                    setActiveCommentId(mc.id);
-                                    setViewMode('meta');
-                                    setTimeout(() => {
-                                      const el = window.document.getElementById(`comment-${mc.id}`);
-                                      el?.scrollIntoView({ behavior: 'smooth', block: 'center' });
-                                    }, 50);
-                                  }}
-                                >
-                                  <div className="flex items-center gap-1.5 mb-1">
-                                    <span
-                                      className="text-[10px] font-medium px-1.5 py-0.5 rounded"
-                                      style={{ backgroundColor: `${priorityColor}20`, color: priorityColor }}
-                                    >
-                                      {mc.priority.toUpperCase()}
-                                    </span>
-                                    <span className="text-[10px] text-neutral-600 ml-auto">
-                                      L{mc.start_line + 1}{mc.end_line !== mc.start_line ? `-${mc.end_line + 1}` : ''}
-                                    </span>
-                                  </div>
-                                  <p className="text-[12px] text-[#b4b4c4] leading-relaxed">{mc.content}</p>
-                                  <div className="flex items-center gap-1 mt-1.5">
-                                    {mc.sources.map((source, si) => (
-                                      <span
-                                        key={si}
-                                        className="w-4 h-4 rounded-full flex items-center justify-center text-[8px] font-bold text-white"
-                                        style={{ backgroundColor: source.persona_color }}
-                                        title={source.persona_name}
-                                      >
-                                        {source.persona_name.charAt(0)}
-                                      </span>
-                                    ))}
-                                  </div>
-                                </div>
-                              );
-                            })}
-                          </div>
-                        </div>
-                      );
-                    })()}
-
-                    {/* Suggestions section: medium + low, collapsible */}
-                    {(() => {
-                      const suggestions = sortedMetaComments.filter(mc => mc.priority === 'medium' || mc.priority === 'low');
-                      if (suggestions.length === 0) return null;
-                      return (
-                        <div className="mt-1">
-                          <button
-                            className="flex items-center gap-1.5 text-xs font-semibold text-neutral-400 uppercase tracking-wider mb-2 px-1 hover:text-neutral-300 transition-colors w-full text-left"
-                            onClick={() => setSuggestionsExpanded(!suggestionsExpanded)}
-                          >
-                            <svg
-                              className={`w-3 h-3 transition-transform ${suggestionsExpanded ? 'rotate-90' : ''}`}
-                              fill="currentColor" viewBox="0 0 20 20"
-                            >
-                              <path d="M6 6L14 10L6 14V6Z" />
-                            </svg>
-                            Suggestions ({suggestions.length})
-                          </button>
-                          {suggestionsExpanded && (
-                            <div className="space-y-1.5">
-                              {suggestions.map((mc) => {
-                                const priorityColor = PRIORITY_COLORS[mc.priority];
-                                return (
-                                  <div
-                                    key={mc.id}
-                                    className="rounded-lg p-2.5 bg-[#12121a] border-l-[3px] cursor-pointer hover:bg-[#16161f] transition-colors"
-                                    style={{ borderLeftColor: priorityColor }}
-                                    onClick={() => {
-                                      setActiveCommentId(mc.id);
-                                      setViewMode('meta');
-                                      setTimeout(() => {
-                                        const el = window.document.getElementById(`comment-${mc.id}`);
-                                        el?.scrollIntoView({ behavior: 'smooth', block: 'center' });
-                                      }, 50);
-                                    }}
-                                  >
-                                    <div className="flex items-center gap-1.5 mb-1">
-                                      <span
-                                        className="text-[10px] font-medium px-1.5 py-0.5 rounded"
-                                        style={{ backgroundColor: `${priorityColor}20`, color: priorityColor }}
-                                      >
-                                        {mc.priority.toUpperCase()}
-                                      </span>
-                                      <span className="text-[10px] text-neutral-600 ml-auto">
-                                        L{mc.start_line + 1}{mc.end_line !== mc.start_line ? `-${mc.end_line + 1}` : ''}
-                                      </span>
-                                    </div>
-                                    <p className="text-[12px] text-[#b4b4c4] leading-relaxed">{mc.content}</p>
-                                    <div className="flex items-center gap-1 mt-1.5">
-                                      {mc.sources.map((source, si) => (
-                                        <span
-                                          key={si}
-                                          className="w-4 h-4 rounded-full flex items-center justify-center text-[8px] font-bold text-white"
-                                          style={{ backgroundColor: source.persona_color }}
-                                          title={source.persona_name}
-                                        >
-                                          {source.persona_name.charAt(0)}
-                                        </span>
-                                      ))}
-                                    </div>
-                                  </div>
-                                );
-                              })}
-                            </div>
-                          )}
-                        </div>
-                      );
-                    })()}
-                  </>
-                )}
-              </>
-            )}
-
             {/* META VIEW */}
             {viewMode === 'meta' && (
               <>
-                {/* Verdict badge */}
-                {metaVerdict && metaComments.length > 0 && (
-                  <div className={`rounded-lg p-3 mb-2 border ${
-                    metaVerdict === 'ship_it' ? 'bg-green-500/10 border-green-500/30' :
-                    metaVerdict === 'fix_first' ? 'bg-yellow-500/10 border-yellow-500/30' :
-                    'bg-red-500/10 border-red-500/30'
-                  }`}>
-                    <div className="flex items-center justify-between">
-                      <div className="flex items-center gap-2">
-                        <span className={`text-lg ${
-                          metaVerdict === 'ship_it' ? 'text-green-400' :
-                          metaVerdict === 'fix_first' ? 'text-yellow-400' :
-                          'text-red-400'
-                        }`}>
-                          {metaVerdict === 'ship_it' ? '\u2713' : metaVerdict === 'fix_first' ? '\u26A0' : '\u2717'}
-                        </span>
-                        <span className={`text-sm font-semibold ${
-                          metaVerdict === 'ship_it' ? 'text-green-400' :
-                          metaVerdict === 'fix_first' ? 'text-yellow-400' :
-                          'text-red-400'
-                        }`}>
-                          {metaVerdict === 'ship_it' ? 'Ship It' :
-                           metaVerdict === 'fix_first' ? 'Fix First' :
-                           'Major Rework'}
-                        </span>
-                      </div>
-                      <span className="text-[11px] text-neutral-400">
-                        {Math.round(metaConfidence * 100)}% consensus
-                      </span>
-                    </div>
-                  </div>
-                )}
-
                 {metaComments.length === 0 && !isSynthesizing && !isReviewing && (
                   <div className="text-center text-neutral-500 py-12">
                     <svg className="w-10 h-10 mx-auto mb-3 opacity-30" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -944,10 +537,6 @@ export default function DocumentDetailPage() {
                         className="p-3"
                         onClick={() => {
                           setActiveCommentId(mc.id);
-                          // Scroll to highlighted line in document
-                          const midLine = Math.floor((mc.start_line + mc.end_line) / 2);
-                          const lineEl = window.document.querySelector(`[data-line="${midLine}"]`);
-                          lineEl?.scrollIntoView({ behavior: 'smooth', block: 'center' });
                         }}
                         onMouseEnter={() => setActiveCommentId(mc.id)}
                         onMouseLeave={() => { if (!isExpanded) setActiveCommentId(null); }}
@@ -1071,8 +660,7 @@ export default function DocumentDetailPage() {
                       style={{ borderLeftColor: comment.persona_color }}
                       onClick={() => {
                         setActiveCommentId(comment.id);
-                        const midLine = Math.floor((comment.start_line + comment.end_line) / 2);
-                        const lineEl = window.document.querySelector(`[data-line="${midLine}"]`);
+                        const lineEl = window.document.querySelector(`[data-line="${comment.start_line}"]`);
                         lineEl?.scrollIntoView({ behavior: 'smooth', block: 'center' });
                       }}
                       onMouseEnter={() => setActiveCommentId(comment.id)}

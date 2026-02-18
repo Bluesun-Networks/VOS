@@ -161,7 +161,7 @@ export default function Home() {
         ) : (
           /* Drop zone */
           <label
-            className={`relative w-full max-w-2xl aspect-[16/8] rounded-2xl cursor-pointer flex flex-col items-center justify-center transition-all duration-300
+            className={`relative w-full max-w-2xl aspect-[4/3] sm:aspect-[16/8] rounded-2xl cursor-pointer flex flex-col items-center justify-center transition-all duration-300
               ${isDragging ? 'scale-[1.02]' : ''} ${isUploading ? 'pointer-events-none' : ''}`}
             style={{
               border: '1px dashed',
@@ -212,15 +212,22 @@ export default function Home() {
         </p>
 
         {/* Persona dots */}
-        <div className={`absolute bottom-6 left-1/2 -translate-x-1/2 flex gap-4 items-center transition-opacity duration-500 ${isDragging ? 'opacity-0' : 'opacity-60'}`}>
+        <div className={`absolute bottom-6 left-1/2 -translate-x-1/2 flex flex-wrap justify-center gap-2 sm:gap-4 items-center transition-opacity duration-500 max-w-[90vw] ${isDragging ? 'opacity-0' : 'opacity-60'}`}>
           {personas.map((p) => (
             <div key={p.name} className="flex items-center gap-1.5">
               <div className="w-1.5 h-1.5 rounded-full" style={{ backgroundColor: p.color }} />
-              <span className="text-[9px] text-neutral-500 tracking-wide uppercase">{p.name}</span>
+              <span className="text-[9px] text-neutral-500 tracking-wide uppercase hidden sm:inline">{p.name}</span>
             </div>
           ))}
         </div>
 
+        {/* Nav */}
+        <nav className={`absolute top-4 right-4 sm:top-5 sm:right-6 transition-opacity ${isDragging ? 'opacity-0' : 'opacity-100'}`}>
+          <a href="/documents" className="flex items-center gap-2 text-xs text-neutral-500 hover:text-neutral-300 active:text-neutral-200 transition-colors tracking-wide uppercase touch-manipulation px-2 py-1.5">
+            <svg className="w-4 h-4 sm:hidden" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6h16M4 12h16M4 18h16" /></svg>
+            <span className="hidden sm:inline">Documents</span>
+          </a>
+        </nav>
       </div>
     </main>
   );
