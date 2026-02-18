@@ -1,8 +1,9 @@
 import os
+import sys
 import shutil
 from fastapi import APIRouter, Depends
 from pydantic import BaseModel
-from typing import List
+from typing import List, Optional
 from sqlalchemy.orm import Session
 from sqlalchemy import text
 
@@ -18,14 +19,42 @@ class CheckDetail(BaseModel):
     message: str
 
 
+class VersionInfo(BaseModel):
+    vos: str
+    python: str
+    fastapi: str
+    sqlalchemy: str
+    anthropic_sdk: str
+
+
 class HealthResponse(BaseModel):
     status: str  # healthy, degraded, unhealthy
     checks: List[CheckDetail]
+    versions: Optional[VersionInfo] = None
+
+
+def _get_versions() -> VersionInfo:
+    import fastapi
+    import sqlalchemy
+    try:
+        import anthropic
+        anthropic_ver = anthropic.__version__
+    except Exception:
+        anthropic_ver = "unknown"
+
+    from main import VOS_VERSION
+    return VersionInfo(
+        vos=VOS_VERSION,
+        python=sys.version.split()[0],
+        fastapi=fastapi.__version__,
+        sqlalchemy=sqlalchemy.__version__,
+        anthropic_sdk=anthropic_ver,
+    )
 
 
 @router.get("/", response_model=HealthResponse)
 async def system_status(db: Session = Depends(get_db)):
-    """Check system health with dependency checks"""
+    """Check system health with dependency checks and version info."""
     checks = []
 
     # 1. Database connectivity
@@ -86,4 +115,4 @@ async def system_status(db: Session = Depends(get_db)):
     else:
         overall = "healthy"
 
-    return HealthResponse(status=overall, checks=checks)
+    return HealthResponse(status=overall, checks=checks, versions=_get_versions())

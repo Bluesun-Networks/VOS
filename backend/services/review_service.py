@@ -1,5 +1,6 @@
 import asyncio
 import logging
+import time
 import uuid
 import re
 from datetime import datetime
@@ -10,6 +11,7 @@ from models.persona import Persona, PersonaTone
 from models.comment import Comment, CommentAnchor
 from core.config import get_settings
 from core.errors import classify_anthropic_error
+from core.observability import metrics
 from database import SessionLocal, DbPersona
 
 logger = logging.getLogger("vos.review")
@@ -276,6 +278,8 @@ class ReviewService:
         model: str,
     ) -> List[Comment]:
         """Run a single persona's review and return all comments"""
+        t0 = time.time()
+        logger.info("Persona '%s' starting review of doc %s (%d paragraphs)", persona.name, document_id, len(paragraphs))
         client = AsyncAnthropic(api_key=self.settings.anthropic_api_key)
 
         prompt = f"""Review this document and provide specific, actionable comments.
@@ -327,6 +331,9 @@ Your comments should reflect your unique perspective and expertise."""
                         created_at=datetime.utcnow()
                     )
                     comments.append(comment)
+            elapsed = time.time() - t0
+            logger.info("Persona '%s' completed doc %s: %d comments in %.1fs", persona.name, document_id, len(comments), elapsed)
+            metrics.record_persona_completion()
         except Exception as e:
             vos_err = classify_anthropic_error(e)
             logger.error(
@@ -361,6 +368,9 @@ Your comments should reflect your unique perspective and expertise."""
                     if pid in self._personas]
 
         paragraphs = self._parse_document_structure(content)
+        review_start = time.time()
+        logger.info("Review started: doc=%s, personas=%d, paragraphs=%d, model=%s", document_id, len(personas), len(paragraphs), model)
+        metrics.record_review_start()
 
         # Emit initial status
         for persona in personas:
@@ -412,4 +422,7 @@ Your comments should reflect your unique perspective and expertise."""
                     "comment": comment.model_dump(mode="json")
                 }
 
+        elapsed = time.time() - review_start
+        logger.info("Review completed: doc=%s, comments=%d, duration=%.1fs", document_id, len(all_comments), elapsed)
+        metrics.record_review_complete(elapsed)
         yield {"type": "done", "total_comments": len(all_comments)}
