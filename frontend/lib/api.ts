@@ -66,6 +66,12 @@ export interface MetaComment {
   created_at: string;
 }
 
+export interface MetaReview {
+  comments: MetaComment[];
+  verdict: 'ship_it' | 'fix_first' | 'major_rework';
+  confidence: number;
+}
+
 export async function fetchDocuments(): Promise<Document[]> {
   const res = await fetch(`${API_BASE_URL}/api/v1/documents/`);
   if (!res.ok) throw new Error('Failed to fetch documents');
@@ -117,7 +123,7 @@ export async function fetchLatestComments(docId: string): Promise<Comment[]> {
   return res.json();
 }
 
-export async function synthesizeMetaReview(docId: string, reviewId: string): Promise<MetaComment[]> {
+export async function synthesizeMetaReview(docId: string, reviewId: string): Promise<MetaReview> {
   const res = await fetch(`${API_BASE_URL}/api/v1/reviews/${docId}/reviews/${reviewId}/meta`, {
     method: 'POST',
   });
@@ -125,9 +131,9 @@ export async function synthesizeMetaReview(docId: string, reviewId: string): Pro
   return res.json();
 }
 
-export async function fetchMetaComments(docId: string, reviewId: string): Promise<MetaComment[]> {
+export async function fetchMetaComments(docId: string, reviewId: string): Promise<MetaReview> {
   const res = await fetch(`${API_BASE_URL}/api/v1/reviews/${docId}/reviews/${reviewId}/meta`);
-  if (!res.ok) return [];
+  if (!res.ok) return { comments: [], verdict: 'ship_it', confidence: 0 };
   return res.json();
 }
 

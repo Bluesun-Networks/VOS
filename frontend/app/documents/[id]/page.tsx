@@ -8,7 +8,7 @@ import {
   fetchDocument, fetchPersonas, fetchLatestComments, startReviewStream,
   fetchReviews, fetchMetaComments, synthesizeMetaReview,
   type Document, type Persona, type Comment, type PersonaStatus,
-  type MetaComment,
+  type MetaComment, type MetaReview,
 } from '@/lib/api';
 
 type ViewMode = 'meta' | 'individual';
@@ -49,6 +49,8 @@ export default function DocumentDetailPage() {
   // Meta review state
   const [viewMode, setViewMode] = useState<ViewMode>('meta');
   const [metaComments, setMetaComments] = useState<MetaComment[]>([]);
+  const [metaVerdict, setMetaVerdict] = useState<string | null>(null);
+  const [metaConfidence, setMetaConfidence] = useState<number>(0);
   const [isSynthesizing, setIsSynthesizing] = useState(false);
   const [expandedMetaId, setExpandedMetaId] = useState<string | null>(null);
   const [hoveredPersonaId, setHoveredPersonaId] = useState<string | null>(null);
@@ -75,8 +77,10 @@ export default function DocumentDetailPage() {
             setCurrentReviewId(completedReview.id);
             try {
               const cached = await fetchMetaComments(docId, completedReview.id);
-              if (cached.length > 0) {
-                setMetaComments(cached);
+              if (cached.comments.length > 0) {
+                setMetaComments(cached.comments);
+                setMetaVerdict(cached.verdict);
+                setMetaConfidence(cached.confidence);
               }
             } catch {
               // No cached meta comments
@@ -101,7 +105,9 @@ export default function DocumentDetailPage() {
     setIsSynthesizing(true);
     try {
       const result = await synthesizeMetaReview(docId, reviewId);
-      setMetaComments(result);
+      setMetaComments(result.comments);
+      setMetaVerdict(result.verdict);
+      setMetaConfidence(result.confidence);
       setViewMode('meta');
     } catch {
       // Synthesis failed, stay on individual view
@@ -115,6 +121,8 @@ export default function DocumentDetailPage() {
     setIsReviewing(true);
     setComments([]);
     setMetaComments([]);
+    setMetaVerdict(null);
+    setMetaConfidence(0);
     setPersonaStatuses(new Map());
     setShowPersonaPanel(false);
     setCurrentReviewId(null);
@@ -475,6 +483,39 @@ export default function DocumentDetailPage() {
             {/* META VIEW */}
             {viewMode === 'meta' && (
               <>
+                {/* Verdict badge */}
+                {metaVerdict && metaComments.length > 0 && (
+                  <div className={`rounded-lg p-3 mb-2 border ${
+                    metaVerdict === 'ship_it' ? 'bg-green-500/10 border-green-500/30' :
+                    metaVerdict === 'fix_first' ? 'bg-yellow-500/10 border-yellow-500/30' :
+                    'bg-red-500/10 border-red-500/30'
+                  }`}>
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-2">
+                        <span className={`text-lg ${
+                          metaVerdict === 'ship_it' ? 'text-green-400' :
+                          metaVerdict === 'fix_first' ? 'text-yellow-400' :
+                          'text-red-400'
+                        }`}>
+                          {metaVerdict === 'ship_it' ? '\u2713' : metaVerdict === 'fix_first' ? '\u26A0' : '\u2717'}
+                        </span>
+                        <span className={`text-sm font-semibold ${
+                          metaVerdict === 'ship_it' ? 'text-green-400' :
+                          metaVerdict === 'fix_first' ? 'text-yellow-400' :
+                          'text-red-400'
+                        }`}>
+                          {metaVerdict === 'ship_it' ? 'Ship It' :
+                           metaVerdict === 'fix_first' ? 'Fix First' :
+                           'Major Rework'}
+                        </span>
+                      </div>
+                      <span className="text-[11px] text-neutral-400">
+                        {Math.round(metaConfidence * 100)}% consensus
+                      </span>
+                    </div>
+                  </div>
+                )}
+
                 {metaComments.length === 0 && !isSynthesizing && !isReviewing && (
                   <div className="text-center text-neutral-500 py-12">
                     <svg className="w-10 h-10 mx-auto mb-3 opacity-30" fill="none" stroke="currentColor" viewBox="0 0 24 24">

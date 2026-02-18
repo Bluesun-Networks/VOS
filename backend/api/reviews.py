@@ -72,6 +72,12 @@ class MetaCommentOut(BaseModel):
     created_at: str
 
 
+class MetaReviewOut(BaseModel):
+    comments: List[MetaCommentOut]
+    verdict: str  # ship_it, fix_first, major_rework
+    confidence: float  # 0.0 - 1.0
+
+
 class ReviewDetail(ReviewSummary):
     comments: List[CommentOut] = []
 
@@ -274,7 +280,7 @@ async def get_latest_comments(doc_id: str, db: Session = Depends(get_db)):
     ]
 
 
-@router.post("/{doc_id}/reviews/{review_id}/meta", response_model=List[MetaCommentOut])
+@router.post("/{doc_id}/reviews/{review_id}/meta", response_model=MetaReviewOut)
 async def synthesize_meta_review(doc_id: str, review_id: str, db: Session = Depends(get_db)):
     """Synthesize individual persona comments into unified meta-review feedback."""
     review = db.query(DbReview).filter(
@@ -286,19 +292,23 @@ async def synthesize_meta_review(doc_id: str, review_id: str, db: Session = Depe
     # Check for cached meta comments
     existing = db.query(DbMetaComment).filter(DbMetaComment.review_id == review_id).all()
     if existing:
-        return [
-            MetaCommentOut(
-                id=mc.id,
-                content=mc.content,
-                start_line=mc.start_line,
-                end_line=mc.end_line,
-                sources=mc.sources,
-                category=mc.category,
-                priority=mc.priority,
-                created_at=mc.created_at.isoformat(),
-            )
-            for mc in existing
-        ]
+        return MetaReviewOut(
+            comments=[
+                MetaCommentOut(
+                    id=mc.id,
+                    content=mc.content,
+                    start_line=mc.start_line,
+                    end_line=mc.end_line,
+                    sources=mc.sources,
+                    category=mc.category,
+                    priority=mc.priority,
+                    created_at=mc.created_at.isoformat(),
+                )
+                for mc in existing
+            ],
+            verdict=review.meta_verdict or "ship_it",
+            confidence=review.meta_confidence or 0.0,
+        )
 
     # Build comments list from DB
     comments_data = [
@@ -314,10 +324,14 @@ async def synthesize_meta_review(doc_id: str, review_id: str, db: Session = Depe
     ]
 
     # Run synthesis
-    meta_comments = await meta_service.synthesize(comments_data)
+    result = await meta_service.synthesize(comments_data)
 
-    # Cache in DB
-    for mc in meta_comments:
+    # Cache verdict and confidence on the review
+    review.meta_verdict = result.verdict
+    review.meta_confidence = result.confidence
+
+    # Cache meta comments in DB
+    for mc in result.comments:
         db_mc = DbMetaComment(
             id=mc.id,
             review_id=review_id,
@@ -332,22 +346,26 @@ async def synthesize_meta_review(doc_id: str, review_id: str, db: Session = Depe
         db.add(db_mc)
     db.commit()
 
-    return [
-        MetaCommentOut(
-            id=mc.id,
-            content=mc.content,
-            start_line=mc.start_line,
-            end_line=mc.end_line,
-            sources=[s.model_dump() for s in mc.sources],
-            category=mc.category,
-            priority=mc.priority,
-            created_at=mc.created_at.isoformat(),
-        )
-        for mc in meta_comments
-    ]
+    return MetaReviewOut(
+        comments=[
+            MetaCommentOut(
+                id=mc.id,
+                content=mc.content,
+                start_line=mc.start_line,
+                end_line=mc.end_line,
+                sources=[s.model_dump() for s in mc.sources],
+                category=mc.category,
+                priority=mc.priority,
+                created_at=mc.created_at.isoformat(),
+            )
+            for mc in result.comments
+        ],
+        verdict=result.verdict,
+        confidence=result.confidence,
+    )
 
 
-@router.get("/{doc_id}/reviews/{review_id}/meta", response_model=List[MetaCommentOut])
+@router.get("/{doc_id}/reviews/{review_id}/meta", response_model=MetaReviewOut)
 async def get_meta_comments(doc_id: str, review_id: str, db: Session = Depends(get_db)):
     """Retrieve cached meta comments for a review."""
     review = db.query(DbReview).filter(
@@ -357,16 +375,20 @@ async def get_meta_comments(doc_id: str, review_id: str, db: Session = Depends(g
         raise HTTPException(status_code=404, detail="Review not found")
 
     meta_comments = db.query(DbMetaComment).filter(DbMetaComment.review_id == review_id).all()
-    return [
-        MetaCommentOut(
-            id=mc.id,
-            content=mc.content,
-            start_line=mc.start_line,
-            end_line=mc.end_line,
-            sources=mc.sources,
-            category=mc.category,
-            priority=mc.priority,
-            created_at=mc.created_at.isoformat(),
-        )
-        for mc in meta_comments
-    ]
+    return MetaReviewOut(
+        comments=[
+            MetaCommentOut(
+                id=mc.id,
+                content=mc.content,
+                start_line=mc.start_line,
+                end_line=mc.end_line,
+                sources=mc.sources,
+                category=mc.category,
+                priority=mc.priority,
+                created_at=mc.created_at.isoformat(),
+            )
+            for mc in meta_comments
+        ],
+        verdict=review.meta_verdict or "ship_it",
+        confidence=review.meta_confidence or 0.0,
+    )

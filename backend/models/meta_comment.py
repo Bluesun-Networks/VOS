@@ -1,5 +1,5 @@
 from pydantic import BaseModel
-from typing import List
+from typing import List, Literal
 from datetime import datetime
 
 
@@ -22,3 +22,10 @@ class MetaComment(BaseModel):
 
     class Config:
         from_attributes = True
+
+
+class MetaSynthesisResult(BaseModel):
+    """Full result of meta synthesis including verdict and confidence."""
+    comments: List[MetaComment]
+    verdict: Literal['ship_it', 'fix_first', 'major_rework']
+    confidence: float  # 0.0 - 1.0, based on reviewer consensus
