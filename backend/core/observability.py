@@ -7,9 +7,6 @@ from contextlib import contextmanager
 from threading import Lock
 from typing import Optional
 
-from fastapi import Request, Response
-from starlette.middleware.base import BaseHTTPMiddleware
-
 logger = logging.getLogger("vos.http")
 
 # ---------------------------------------------------------------------------
@@ -128,49 +125,63 @@ def track_review():
 
 
 # ---------------------------------------------------------------------------
-# Request logging middleware
+# Pure ASGI request logging middleware (does NOT buffer StreamingResponse)
 # ---------------------------------------------------------------------------
-class RequestLoggingMiddleware(BaseHTTPMiddleware):
-    """Log every request with method, path, status, duration, and request ID."""
+_QUIET_PATHS = frozenset({"/health", "/", "/docs", "/openapi.json", "/redoc"})
 
-    # Paths that are too noisy to log at INFO level
-    _quiet_paths = {"/health", "/", "/docs", "/openapi.json", "/redoc"}
 
-    async def dispatch(self, request: Request, call_next):
+class RequestLoggingMiddleware:
+    """Pure ASGI middleware — logs requests without buffering response bodies.
+
+    Unlike BaseHTTPMiddleware, this passes through StreamingResponse (SSE)
+    without buffering, so events are delivered to the client in real time.
+    """
+
+    def __init__(self, app):
+        self.app = app
+
+    async def __call__(self, scope, receive, send):
+        if scope["type"] != "http":
+            await self.app(scope, receive, send)
+            return
+
         request_id = uuid.uuid4().hex[:12]
-        request.state.request_id = request_id
+        method = scope.get("method", "?")
+        path = scope.get("path", "/")
+        start = time.time()
+        status_code = 0
 
-        # Stash request ID for logger access in downstream code
+        # Stash request ID for downstream code
         import asyncio
         task = asyncio.current_task()
         if task:
             _request_id_ctx[id(task)] = request_id
 
-        start = time.time()
-        response: Response = await call_next(request)
-        duration = time.time() - start
+        async def send_wrapper(message):
+            nonlocal status_code
+            if message["type"] == "http.response.start":
+                status_code = message.get("status", 0)
+                # Inject X-Request-ID header
+                headers = list(message.get("headers", []))
+                headers.append((b"x-request-id", request_id.encode()))
+                message = {**message, "headers": headers}
+            elif message["type"] == "http.response.body":
+                # Only log + record metrics when the response is done
+                if not message.get("more_body", False):
+                    duration = time.time() - start
+                    metrics.record_request(method, status_code, duration)
+                    level = logging.DEBUG if path in _QUIET_PATHS else logging.INFO
+                    logger.log(
+                        level,
+                        "%s %s %d %.0fms [%s]",
+                        method,
+                        path,
+                        status_code,
+                        duration * 1000,
+                        request_id,
+                    )
+                    if task:
+                        _request_id_ctx.pop(id(task), None)
+            await send(message)
 
-        # Record metrics
-        metrics.record_request(request.method, response.status_code, duration)
-
-        # Add request-id header to response
-        response.headers["X-Request-ID"] = request_id
-
-        # Log the request
-        path = request.url.path
-        level = logging.DEBUG if path in self._quiet_paths else logging.INFO
-        logger.log(
-            level,
-            "%s %s %d %.0fms [%s]",
-            request.method,
-            path,
-            response.status_code,
-            duration * 1000,
-            request_id,
-        )
-
-        # Cleanup context
-        if task:
-            _request_id_ctx.pop(id(task), None)
-
-        return response
+        await self.app(scope, receive, send_wrapper)
