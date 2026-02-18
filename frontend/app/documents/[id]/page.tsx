@@ -230,7 +230,7 @@ export default function DocumentDetailPage() {
   }
 
   return (
-    <main className="h-screen bg-[#0a0a0f] text-[#e4e4ec] flex flex-col overflow-hidden">
+    <main className="flex-1 bg-[#0a0a0f] text-[#e4e4ec] flex flex-col overflow-hidden">
       {/* Top bar */}
       <div className="flex-shrink-0 border-b border-[#2a2a3a] bg-[#0c0c12] px-4 py-3">
         <div className="flex items-center justify-between">
