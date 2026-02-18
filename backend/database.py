@@ -44,6 +44,23 @@ class DbDocument(Base):
     reviews = relationship("DbReview", back_populates="document", cascade="all, delete-orphan")
 
 
+class DbReviewJob(Base):
+    __tablename__ = "review_jobs"
+
+    id = Column(String, primary_key=True)
+    document_id = Column(String, ForeignKey("documents.id"), nullable=False)
+    status = Column(String, default="queued")  # queued, running, completed, failed
+    provider = Column(String, nullable=True)  # e.g. "anthropic"
+    model = Column(String, nullable=True)  # e.g. "claude-sonnet-4-5-20250929"
+    trigger = Column(String, default="manual")  # manual, auto
+    error_message = Column(Text, nullable=True)
+    created_at = Column(DateTime, default=datetime.utcnow)
+    completed_at = Column(DateTime, nullable=True)
+
+    document = relationship("DbDocument")
+    reviews = relationship("DbReview", back_populates="job")
+
+
 class DbReview(Base):
     __tablename__ = "reviews"
 
@@ -51,10 +68,12 @@ class DbReview(Base):
     document_id = Column(String, ForeignKey("documents.id"), nullable=False)
     persona_ids = Column(JSON, nullable=False)
     status = Column(String, default="pending")  # pending, running, completed, failed
+    job_id = Column(String, ForeignKey("review_jobs.id"), nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow)
     completed_at = Column(DateTime, nullable=True)
 
     document = relationship("DbDocument", back_populates="reviews")
+    job = relationship("DbReviewJob", back_populates="reviews")
     comments = relationship("DbComment", back_populates="review", cascade="all, delete-orphan")
     meta_comments = relationship("DbMetaComment", back_populates="review", cascade="all, delete-orphan")
 
