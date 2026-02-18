@@ -1,4 +1,4 @@
-from sqlalchemy import create_engine, Column, String, Text, DateTime, Integer, ForeignKey, JSON
+from sqlalchemy import create_engine, Column, String, Text, DateTime, Integer, ForeignKey, JSON, Boolean
 from sqlalchemy.orm import declarative_base, sessionmaker, relationship
 from datetime import datetime
 
@@ -17,6 +17,7 @@ class DbDocument(Base):
     description = Column(Text, nullable=True)
     content = Column(Text, nullable=False)
     repo_path = Column(String, nullable=True)
+    is_archived = Column(Boolean, default=False, nullable=False)
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
