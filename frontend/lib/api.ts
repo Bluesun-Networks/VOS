@@ -5,6 +5,7 @@ export interface Document {
   title: string;
   description?: string;
   content: string;
+  is_archived: boolean;
   created_at: string;
   updated_at: string;
   review_count: number;
@@ -73,8 +74,9 @@ export interface MetaReview {
   confidence: number;
 }
 
-export async function fetchDocuments(): Promise<Document[]> {
-  const res = await fetch(`${API_BASE_URL}/api/v1/documents/`);
+export async function fetchDocuments(includeArchived = false): Promise<Document[]> {
+  const params = includeArchived ? '?include_archived=true' : '';
+  const res = await fetch(`${API_BASE_URL}/api/v1/documents/${params}`);
   if (!res.ok) throw new Error('Failed to fetch documents');
   return res.json();
 }
@@ -146,6 +148,29 @@ export async function fetchMetaComments(docId: string, reviewId: string): Promis
   const res = await fetch(`${API_BASE_URL}/api/v1/reviews/${docId}/reviews/${reviewId}/meta`);
   if (!res.ok) return { comments: [], verdict: 'ship_it', confidence: 0 };
   return res.json();
+}
+
+export async function archiveDocument(docId: string): Promise<Document> {
+  const res = await fetch(`${API_BASE_URL}/api/v1/documents/${docId}/archive`, {
+    method: 'POST',
+  });
+  if (!res.ok) throw new Error('Failed to archive document');
+  return res.json();
+}
+
+export async function restoreDocument(docId: string): Promise<Document> {
+  const res = await fetch(`${API_BASE_URL}/api/v1/documents/${docId}/restore`, {
+    method: 'POST',
+  });
+  if (!res.ok) throw new Error('Failed to restore document');
+  return res.json();
+}
+
+export async function deleteDocument(docId: string): Promise<void> {
+  const res = await fetch(`${API_BASE_URL}/api/v1/documents/${docId}`, {
+    method: 'DELETE',
+  });
+  if (!res.ok) throw new Error('Failed to delete document');
 }
 
 export function startReviewStream(

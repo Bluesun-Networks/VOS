@@ -8,6 +8,7 @@ from anthropic import AsyncAnthropic
 from models.persona import Persona, PersonaTone
 from models.comment import Comment, CommentAnchor
 from core.config import get_settings
+from database import SessionLocal, DbPersona
 
 PERSONAS = [
     Persona(
@@ -167,12 +168,61 @@ Keep each comment to 2-3 sentences. Focus on what matters for decision-making.""
 ]
 
 
+def seed_default_personas():
+    """Seed default personas into the database if they don't exist."""
+    db = SessionLocal()
+    try:
+        for p in PERSONAS:
+            existing = db.query(DbPersona).filter(DbPersona.id == p.id).first()
+            if not existing:
+                db_persona = DbPersona(
+                    id=p.id,
+                    name=p.name,
+                    description=p.description,
+                    system_prompt=p.system_prompt,
+                    tone=p.tone.value,
+                    focus_areas=p.focus_areas,
+                    color=p.color,
+                    weight=p.weight,
+                )
+                db.add(db_persona)
+        db.commit()
+    finally:
+        db.close()
+
+
+def _load_personas_from_db() -> dict[str, Persona]:
+    """Load personas from DB, falling back to hardcoded defaults."""
+    db = SessionLocal()
+    try:
+        db_personas = db.query(DbPersona).all()
+        if db_personas:
+            return {
+                p.id: Persona(
+                    id=p.id,
+                    name=p.name,
+                    description=p.description,
+                    system_prompt=p.system_prompt,
+                    tone=PersonaTone(p.tone),
+                    focus_areas=p.focus_areas or [],
+                    color=p.color,
+                    weight=p.weight,
+                )
+                for p in db_personas
+            }
+    except Exception:
+        pass
+    finally:
+        db.close()
+    return {p.id: p for p in PERSONAS}
+
+
 class ReviewService:
     """AI-powered document review with concurrent streaming"""
 
     def __init__(self):
         self.settings = get_settings()
-        self._personas = {p.id: p for p in PERSONAS}
+        self._personas = _load_personas_from_db()
 
     def get_persona(self, persona_id: str) -> Optional[Persona]:
         return self._personas.get(persona_id)

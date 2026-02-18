@@ -21,7 +21,7 @@ CSRF_EXEMPT_PATHS = {"/api/v1/reviews/upload"}
 
 def generate_csrf_token(session_id: str) -> str:
     """Generate a CSRF token tied to a session identifier."""
-    return hmac.new(
+    return hmac.HMAC(
         _CSRF_SECRET.encode(),
         session_id.encode(),
         hashlib.sha256,

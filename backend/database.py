@@ -1,4 +1,4 @@
-from sqlalchemy import create_engine, Column, String, Text, DateTime, Integer, Float, ForeignKey, JSON
+from sqlalchemy import create_engine, Column, String, Text, DateTime, Integer, Float, Boolean, ForeignKey, JSON
 from sqlalchemy.orm import declarative_base, sessionmaker, relationship
 from datetime import datetime
 
@@ -17,10 +17,42 @@ class DbDocument(Base):
     description = Column(Text, nullable=True)
     content = Column(Text, nullable=False)
     repo_path = Column(String, nullable=True)
+    is_archived = Column(Boolean, default=False, nullable=False)
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
     reviews = relationship("DbReview", back_populates="document", cascade="all, delete-orphan")
+
+
+class DbPersona(Base):
+    __tablename__ = "personas"
+
+    id = Column(String, primary_key=True)
+    name = Column(String, nullable=False)
+    description = Column(Text, nullable=True)
+    system_prompt = Column(Text, nullable=False)
+    tone = Column(String, nullable=False, default="neutral")
+    focus_areas = Column(JSON, default=[])
+    color = Column(String, default="#6366f1")
+    weight = Column(Float, default=1.0)
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+
+class DbReviewJob(Base):
+    __tablename__ = "review_jobs"
+
+    id = Column(String, primary_key=True)
+    document_id = Column(String, ForeignKey("documents.id"), nullable=False)
+    status = Column(String, default="queued")  # queued, running, completed, failed
+    provider = Column(String, nullable=True)
+    model = Column(String, nullable=True)
+    trigger = Column(String, default="manual")  # manual, ci, webhook
+    error_message = Column(Text, nullable=True)
+    created_at = Column(DateTime, default=datetime.utcnow)
+    completed_at = Column(DateTime, nullable=True)
+
+    reviews = relationship("DbReview", back_populates="job")
 
 
 class DbReview(Base):
@@ -28,6 +60,7 @@ class DbReview(Base):
 
     id = Column(String, primary_key=True)
     document_id = Column(String, ForeignKey("documents.id"), nullable=False)
+    job_id = Column(String, ForeignKey("review_jobs.id"), nullable=True)
     persona_ids = Column(JSON, nullable=False)
     status = Column(String, default="pending")  # pending, running, completed, failed
     created_at = Column(DateTime, default=datetime.utcnow)
@@ -37,6 +70,7 @@ class DbReview(Base):
     meta_confidence = Column(Float, nullable=True)  # 0.0 - 1.0
 
     document = relationship("DbDocument", back_populates="reviews")
+    job = relationship("DbReviewJob", back_populates="reviews")
     comments = relationship("DbComment", back_populates="review", cascade="all, delete-orphan")
     meta_comments = relationship("DbMetaComment", back_populates="review", cascade="all, delete-orphan")
 

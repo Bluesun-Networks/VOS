@@ -78,8 +78,8 @@ export default function DocumentDetailPage() {
             setCurrentReviewId(completedReview.id);
             try {
               const cached = await fetchMetaComments(docId, completedReview.id);
-              if (cached.length > 0) {
-                setMetaComments(cached);
+              if (cached.comments.length > 0) {
+                setMetaComments(cached.comments);
               }
             } catch {
               // No cached meta comments
@@ -104,7 +104,7 @@ export default function DocumentDetailPage() {
     setIsSynthesizing(true);
     try {
       const result = await synthesizeMetaReview(docId, reviewId);
-      setMetaComments(result);
+      setMetaComments(result.comments);
       setViewMode('meta');
     } catch {
       // Synthesis failed, stay on individual view
