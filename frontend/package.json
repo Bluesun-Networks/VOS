@@ -10,7 +10,7 @@
   },
   "dependencies": {
     "autoprefixer": "^10.4.17",
-    "next": "15.5.12",
+    "next": "15.5.18",
     "postcss": "^8.4.33",
     "react": "^18",
     "react-dom": "^18",
